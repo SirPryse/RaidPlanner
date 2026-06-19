@@ -98,6 +98,8 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .glyph.dps{background:var(--dps-soft);color:var(--dps);box-shadow:inset 0 0 0 1px var(--dps-line)}
 .glyph.sup{background:var(--sup-soft);color:var(--sup);box-shadow:inset 0 0 0 1px var(--sup-line)}
 .cname{flex:1;background:transparent;border:none;font-weight:600;font-size:13.5px;padding:2px;min-width:0}
+.cp{font-family:var(--data);font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0}
+.cp.dps{color:var(--dps)} .cp.sup{color:var(--sup)}
 .cname:focus{outline:none;background:rgba(255,255,255,.03);border-radius:4px}
 .ilvl-in{width:64px;background:var(--bg);border:1px solid var(--line);border-radius:6px;
   font-family:var(--data);font-size:13px;text-align:right;padding:4px 7px;color:var(--text)}
@@ -324,7 +326,31 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .cand-empty{padding:26px 14px;text-align:center;color:var(--dim);font-style:italic;font-size:13.5px}
 .modal-foot{padding:11px 14px;border-top:1px solid var(--line-soft);display:flex;justify-content:flex-end}
 
+/* ---------- api key + friend import ---------- */
+.apikey-box{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
+  border-radius:10px;padding:7px 10px}
+.apikey-box label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-family:var(--data)}
+.apikey-box input{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:6px 9px;
+  font-family:var(--data);font-size:12.5px;color:var(--text);width:150px}
+.apikey-box input:focus{outline:none;border-color:var(--gold-dim)}
+.apikey-box .dotok{width:8px;height:8px;border-radius:50%;background:var(--sup);flex-shrink:0}
+.apikey-box .dotno{width:8px;height:8px;border-radius:50%;background:var(--dim);flex-shrink:0}
+.fbody{padding:16px 18px;display:flex;flex-direction:column;gap:13px}
+.fld{display:flex;flex-direction:column;gap:6px}
+.fld label{font-size:12px;color:var(--muted);letter-spacing:.02em}
+.f-in{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 11px;font-size:14px;color:var(--text)}
+.f-in:focus{outline:none;border-color:var(--gold-dim)}
+.f-warn{display:flex;gap:8px;align-items:flex-start;color:var(--amber);font-size:12.5px;line-height:1.45;
+  background:var(--amber-soft);border:1px solid rgba(224,169,59,.3);border-radius:9px;padding:9px 11px}
+.f-warn svg{flex-shrink:0;margin-top:1px}
+.f-status{font-size:12.5px;line-height:1.5;min-height:2px}
+.f-status .f-err{color:var(--dps);display:flex;gap:7px;align-items:flex-start}
+.f-status .f-err svg{flex-shrink:0;margin-top:1px}
+.f-status .f-load{color:var(--teal);font-family:var(--data)}
+.f-note{font-size:11.5px;color:var(--dim);line-height:1.45}
+
 @media (max-width:560px){
+  .apikey-box input{width:110px}
   .raidrow.head span:first-child{flex:1}
   .topbar-inner{padding:14px 16px 12px}
   .wrap{padding:0 14px 60px}
@@ -363,6 +389,10 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 
 <div class="modal-scrim" id="pscrim" data-action="close-picker">
   <div class="modal" id="picker" data-action="noop"></div>
+</div>
+
+<div class="modal-scrim" id="fscrim" data-action="close-friend">
+  <div class="modal" id="fmodal" data-action="noop"></div>
 </div>
 
 <script>
@@ -417,7 +447,7 @@ const DEFAULT_PLAYERS = [
   ]},
 ];
 
-let state = { tab:"roster", players:null, raids:null, parties:null };
+let state = { tab:"roster", players:null, raids:null, parties:null, apiKey:"" };
 let pick = null; // active picker target {partyId, slotIdx}
 
 /* =========================================================
@@ -457,6 +487,47 @@ async function save(quiet){
   const payload = JSON.stringify({players:state.players,raids:state.raids,parties:state.parties});
   try{ await store.set(KEY,payload); if(!quiet) flashSaved(); }catch(e){}
 }
+
+/* API key stored separately so "reset to defaults" never wipes it */
+const AKEY = "wartable:apikey";
+async function loadApiKey(){ try{ const r=await store.get(AKEY); state.apiKey = (r&&r.value)||""; }catch(e){ state.apiKey=""; } }
+async function saveApiKey(){ try{ await store.set(AKEY, state.apiKey||""); }catch(e){} }
+
+/* Roster import via api.ags.lol (two-step: character -> roster) */
+const API_BASE = "https://api.ags.lol/api/v1/mirth";
+const SUP_HINTS = ["holyknight","paladin","bard","artist","painter","valkyrie"];
+function roleForClass(cls){
+  const s = String(cls||"").toLowerCase();
+  return SUP_HINTS.some(h=>s.includes(h)) ? "sup" : "dps";
+}
+// Authoritative: max_combat_power.id (1 = DPS, 2 = SUP). Falls back to class name.
+function roleFromApi(c){
+  const id = c && c.max_combat_power && c.max_combat_power.id;
+  if(id===2) return "sup";
+  if(id===1) return "dps";
+  return roleForClass(c && c.class);
+}
+const cpOf = c => (c && c.max_combat_power && c.max_combat_power.score!=null) ? round2(c.max_combat_power.score) : null;
+const round2 = v => { const n=parseFloat(v); return isNaN(n)?0:Math.round(n*100)/100; };
+async function fetchRoster(region, name){
+  if(!state.apiKey) throw "Enter your API key first (top-right of the Roster tab).";
+  const h = { headers:{ "x-api-key": state.apiKey } };
+  let cRes;
+  try{ cRes = await fetch(`${API_BASE}/characters/by-name/${encodeURIComponent(region)}/${encodeURIComponent(name)}`, h); }
+  catch(e){ throw "Could not reach the API — a hosted browser page may be blocked by the API's CORS policy."; }
+  if(cRes.status===401 || cRes.status===403) throw "API key was rejected (401/403). Check the key.";
+  if(cRes.status===404) throw `No character named “${name}” found in ${region}.`;
+  if(!cRes.ok) throw `Character lookup failed (HTTP ${cRes.status}).`;
+  const ch = await cRes.json();
+  const rg = ch && ch.roster_guid;
+  if(!rg) throw "That character has no roster id in the response.";
+  let rRes;
+  try{ rRes = await fetch(`${API_BASE}/rosters/by-guid/${encodeURIComponent(rg)}`, h); }
+  catch(e){ throw "Could not reach the API on the roster step (possible CORS block)."; }
+  if(!rRes.ok) throw `Roster lookup failed (HTTP ${rRes.status}).`;
+  const roster = await rRes.json();
+  return { searched: ch, roster };
+}
 function flashSaved(){
   const t=document.getElementById("savetag"); t.classList.add("show");
   clearTimeout(saveTimer); saveTimer=setTimeout(()=>t.classList.remove("show"),1100);
@@ -465,6 +536,7 @@ const clone = o => JSON.parse(JSON.stringify(o));
 const uid = () => Math.random().toString(36).slice(2,9);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 const fmtIl = v => { const n=parseFloat(v); return isNaN(n)?'—':(Number.isInteger(n)?String(n):(Math.round(n*100)/100).toFixed(2)); };
+const fmtCp = v => { const n=parseFloat(v); return isNaN(n)?'' : Math.round(n).toLocaleString(); };
 
 /* =========================================================
    Lookups
@@ -576,6 +648,7 @@ function renderRoster(){
       <div class="char">
         ${roleGlyph(c.role)}
         <input class="cname" value="${esc(c.name)}" placeholder="Character" data-field="char-name" data-pid="${p.id}" data-cid="${c.id}" />
+        ${c.cp!=null?`<span class="cp ${c.role}" title="Combat power">${fmtCp(c.cp)}</span>`:''}
         <input class="ilvl-in" type="number" step="0.01" value="${esc(c.ilvl)}" data-field="char-ilvl" data-pid="${p.id}" data-cid="${c.id}" />
         <select class="role-sel" data-field="char-role" data-pid="${p.id}" data-cid="${c.id}">
           <option value="dps" ${c.role==='dps'?'selected':''}>DPS</option>
@@ -596,13 +669,19 @@ function renderRoster(){
       </div>`;
   }).join("");
 
+  const hasKey = !!(state.apiKey && state.apiKey.length);
   document.getElementById("view").innerHTML = `
     <div class="section-head">
       <div><div class="eyebrow">The Group</div><h2>Your roster &amp; friends</h2></div>
-      <div class="hint">Add and edit characters here. The badge on each shows how many raids it's currently slotted into (max ${RAID_CAP}). Build the actual parties in the Build tab.</div>
+      <div class="apikey-box">
+        <span class="${hasKey?'dotok':'dotno'}" title="${hasKey?'Key set':'No key yet'}"></span>
+        <label>API key</label>
+        <input type="password" placeholder="x-api-key" value="${esc(state.apiKey)}" data-field="api-key" autocomplete="off" spellcheck="false" />
+      </div>
     </div>
+    <div class="hint" style="margin:-6px 2px 16px">Add and edit characters here, or import a friend's whole roster with “Add a friend”. The badge on each character shows how many raids it's slotted into (max ${RAID_CAP}).</div>
     <div class="roster-grid">${cards}</div>
-    <div class="add-player"><button class="btn gold" data-action="add-player">${SVG.plus} Add a friend</button></div>`;
+    <div class="add-player"><button class="btn gold" data-action="open-friend">${SVG.plus} Add a friend</button></div>`;
 }
 
 /* =========================================================
@@ -735,6 +814,66 @@ function renderPicker(){
 }
 
 /* =========================================================
+   Friend import modal
+   ========================================================= */
+const REGIONS = ["CE","NAE","NAW","NA"];
+function renderFriend(){
+  const hasKey = !!(state.apiKey && state.apiKey.length);
+  document.getElementById("fmodal").innerHTML = `
+    <div class="modal-head">
+      ${SVG.user}
+      <div style="flex:1;min-width:0">
+        <div class="mt">Add a friend</div>
+        <div class="ms">import a roster by character</div>
+      </div>
+      <button class="close-x" data-action="close-friend">${SVG.x}</button>
+    </div>
+    <div class="fbody">
+      ${hasKey?'':`<div class="f-warn">${warnIcon()}<span>No API key set. Add it in the top-right of the Roster tab, or add a blank friend below.</span></div>`}
+      <div class="fld">
+        <label>Region</label>
+        <select id="f-region" class="f-in">${REGIONS.map(r=>`<option value="${r}">${r}</option>`).join("")}</select>
+      </div>
+      <div class="fld">
+        <label>Character name</label>
+        <input id="f-name" class="f-in" placeholder="e.g. Raineryaa" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="f-status" id="f-status"></div>
+      <div class="f-note">Pulls every character on the roster, sets each role from its combat-power type, and shows combat power in DPS-red / support-green next to the name.</div>
+    </div>
+    <div class="modal-foot" style="justify-content:space-between">
+      <button class="btn ghost" data-action="add-blank-friend">Add blank instead</button>
+      <button class="btn gold" data-action="fetch-roster" id="f-go">Fetch roster</button>
+    </div>`;
+}
+function openFriend(){ renderFriend(); document.getElementById("fscrim").classList.add("open"); setTimeout(()=>{ const n=document.getElementById("f-name"); if(n) n.focus(); },60); }
+function closeFriend(){ document.getElementById("fscrim").classList.remove("open"); }
+function fErr(msg){ return `<div class="f-err">${warnIcon()}<span>${esc(msg)}</span></div>`; }
+async function importFriend(){
+  const regionEl=document.getElementById("f-region"), nameEl=document.getElementById("f-name");
+  const statusEl=document.getElementById("f-status"), go=document.getElementById("f-go");
+  if(!regionEl) return;
+  const region=regionEl.value, name=(nameEl.value||"").trim();
+  if(!state.apiKey){ statusEl.innerHTML=fErr("Enter your API key first (top-right of the Roster tab)."); return; }
+  if(!name){ statusEl.innerHTML=fErr("Type a character name."); nameEl.focus(); return; }
+  go.disabled=true; statusEl.innerHTML=`<span class="f-load">Fetching ${esc(name)} · ${esc(region)} …</span>`;
+  try{
+    const { searched, roster } = await fetchRoster(region, name);
+    const chars=(roster.characters||[])
+      .filter(c=>c && c.name)
+      .map(c=>({ id:uid(), name:c.name, ilvl:round2(c.item_level), role:roleFromApi(c), cp:cpOf(c) }))
+      .sort((a,b)=>b.ilvl-a.ilvl);
+    if(!chars.length){ statusEl.innerHTML=fErr("That roster came back with no characters."); go.disabled=false; return; }
+    const pname = (searched && searched.name) ? searched.name : name;
+    state.players.push({ id:uid(), name:pname, chars });
+    save(); closeFriend(); renderRoster(); renderStats();
+  }catch(e){
+    statusEl.innerHTML=fErr(typeof e==="string"?e:((e&&e.message)||"Request failed."));
+    if(go) go.disabled=false;
+  }
+}
+
+/* =========================================================
    Settings drawer
    ========================================================= */
 function renderSettings(){
@@ -798,6 +937,12 @@ document.addEventListener("click", e=>{
     case "open-settings": openDrawer(true); break;
     case "close-settings": openDrawer(false); break;
     case "close-picker": closePicker(); break;
+    case "open-friend": openFriend(); break;
+    case "close-friend": closeFriend(); break;
+    case "fetch-roster": importFriend(); break;
+    case "add-blank-friend":
+      state.players.push({id:uid(),name:"New friend",chars:[{id:uid(),name:"Character",ilvl:1710,role:"dps"}]});
+      save(); closeFriend(); renderRoster(); renderStats(); break;
 
     case "add-player":
       state.players.push({id:uid(),name:"New friend",chars:[{id:uid(),name:"Character",ilvl:1710,role:"dps"}]});
@@ -852,6 +997,7 @@ document.addEventListener("input", e=>{
   else if(f==="raid-family"){ const r=state.raids[+el.dataset.ri]; if(r) r.family=el.value; }
   else if(f==="raid-req"){ const r=state.raids[+el.dataset.ri]; if(r) r.req=parseFloat(el.value)||0; }
   else if(f==="party-name"){ const p=state.parties.find(x=>x.id===el.dataset.party); if(p) p.name=el.value; }
+  else if(f==="api-key"){ state.apiKey=el.value.trim(); saveApiKey(); const d=document.querySelector(".apikey-box span"); if(d) d.className=state.apiKey?'dotok':'dotno'; return; }
   else return;
   save(true);
 });
@@ -872,12 +1018,15 @@ function openDrawer(open){
   document.getElementById("drawer").classList.toggle("open",open);
   if(open) renderSettings();
 }
-document.addEventListener("keydown",e=>{ if(e.key==="Escape"){ closePicker(); openDrawer(false); } });
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){ closePicker(); closeFriend(); openDrawer(false); }
+  if(e.key==="Enter" && document.getElementById("fscrim").classList.contains("open") && e.target.id==="f-name"){ importFriend(); }
+});
 
 /* =========================================================
    Boot
    ========================================================= */
-(async function(){ await loadState(); render(); })();
+(async function(){ await loadApiKey(); await loadState(); render(); })();
 
 </script>
 </body>
