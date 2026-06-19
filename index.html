@@ -417,43 +417,15 @@ const REQ_TABLE = [
 ];
 const RAID_CAP = 3; // each character may run at most 3 raids per week
 
-const DEFAULT_PLAYERS = [
-  { id:"you", name:"You", chars:[
-    {id:"c1",name:"Sirpryse",ilvl:1758.33,role:"sup"},
-    {id:"c2",name:"Slaypryse",ilvl:1738.33,role:"dps"},
-    {id:"c3",name:"Misspryse",ilvl:1735,role:"sup"},
-    {id:"c4",name:"Beiduu",ilvl:1715.83,role:"dps"},
-    {id:"c5",name:"Cutepryse",ilvl:1711.67,role:"dps"},
-    {id:"c6",name:"Lunapryse",ilvl:1710,role:"sup"},
-  ]},
-  { id:"f_rosa", name:"Rosa", chars:[
-    {id:"r1",name:"Rösalyne",ilvl:1732.5,role:"dps"},
-    {id:"r2",name:"Rósáline",ilvl:1724.67,role:"dps"},
-    {id:"r3",name:"Rxsályne",ilvl:1723.83,role:"dps"},
-    {id:"r4",name:"Rxsáline",ilvl:1720,role:"dps"},
-    {id:"r5",name:"Rosxlyne",ilvl:1705.33,role:"dps"},
-    {id:"r6",name:"Rxsaline",ilvl:1700.83,role:"dps"},
-  ]},
-  { id:"f_serc", name:"Serc", chars:[
-    {id:"s1",name:"Sercass",ilvl:1780,role:"dps"},
-    {id:"s2",name:"Shuvishisune",ilvl:1760,role:"dps"},
-    {id:"s3",name:"Shirinoria",ilvl:1756.67,role:"dps"},
-    {id:"s4",name:"Shayverion",ilvl:1750.83,role:"dps"},
-    {id:"s5",name:"Solthyra",ilvl:1735,role:"dps"},
-    {id:"s6",name:"Solvenna",ilvl:1733.33,role:"dps"},
-    {id:"s7",name:"Selwen",ilvl:1721.67,role:"dps"},
-    {id:"s8",name:"Sereimora",ilvl:1717.67,role:"dps"},
-    {id:"s9",name:"Saleif",ilvl:1710,role:"dps"},
-  ]},
-];
+const DEFAULT_PLAYERS = [];
 
-let state = { tab:"roster", players:null, raids:null, parties:null, apiKey:"" };
+let state = { tab:"roster", players:null, raids:null, parties:null, apiKey:"", proxy:"" };
 let pick = null; // active picker target {partyId, slotIdx}
 
 /* =========================================================
    Persistence
    ========================================================= */
-const KEY = "wartable:v2";
+const KEY = "wartable:v3";
 // Works both inside Claude (window.storage) and as a plain hosted page (localStorage).
 const store = {
   async get(k){
@@ -492,9 +464,18 @@ async function save(quiet){
 const AKEY = "wartable:apikey";
 async function loadApiKey(){ try{ const r=await store.get(AKEY); state.apiKey = (r&&r.value)||""; }catch(e){ state.apiKey=""; } }
 async function saveApiKey(){ try{ await store.set(AKEY, state.apiKey||""); }catch(e){} }
+const PKEY = "wartable:proxy";
+async function loadProxy(){ try{ const r=await store.get(PKEY); state.proxy = (r&&r.value)||""; }catch(e){ state.proxy=""; } }
+async function saveProxy(){ try{ await store.set(PKEY, state.proxy||""); }catch(e){} }
 
 /* Roster import via api.ags.lol (two-step: character -> roster) */
 const API_BASE = "https://api.ags.lol/api/v1/mirth";
+// When a proxy is set, requests go to  <proxy>?url=<encoded target>.
+function apiUrl(path){
+  const target = API_BASE + path;
+  if(state.proxy){ const p=state.proxy.replace(/\/+$/,""); return p + (p.includes("?")?"&":"?") + "url=" + encodeURIComponent(target); }
+  return target;
+}
 const SUP_HINTS = ["holyknight","paladin","bard","artist","painter","valkyrie"];
 function roleForClass(cls){
   const s = String(cls||"").toLowerCase();
@@ -513,8 +494,8 @@ async function fetchRoster(region, name){
   if(!state.apiKey) throw "Enter your API key first (top-right of the Roster tab).";
   const h = { headers:{ "x-api-key": state.apiKey } };
   let cRes;
-  try{ cRes = await fetch(`${API_BASE}/characters/by-name/${encodeURIComponent(region)}/${encodeURIComponent(name)}`, h); }
-  catch(e){ throw "Could not reach the API — a hosted browser page may be blocked by the API's CORS policy."; }
+  try{ cRes = await fetch(apiUrl(`/characters/by-name/${encodeURIComponent(region)}/${encodeURIComponent(name)}`), h); }
+  catch(e){ throw "Could not reach the API — your browser is likely blocked by CORS. Add a proxy URL below."; }
   if(cRes.status===401 || cRes.status===403) throw "API key was rejected (401/403). Check the key.";
   if(cRes.status===404) throw `No character named “${name}” found in ${region}.`;
   if(!cRes.ok) throw `Character lookup failed (HTTP ${cRes.status}).`;
@@ -522,8 +503,8 @@ async function fetchRoster(region, name){
   const rg = ch && ch.roster_guid;
   if(!rg) throw "That character has no roster id in the response.";
   let rRes;
-  try{ rRes = await fetch(`${API_BASE}/rosters/by-guid/${encodeURIComponent(rg)}`, h); }
-  catch(e){ throw "Could not reach the API on the roster step (possible CORS block)."; }
+  try{ rRes = await fetch(apiUrl(`/rosters/by-guid/${encodeURIComponent(rg)}`), h); }
+  catch(e){ throw "Could not reach the API on the roster step — likely CORS. Add a proxy URL below."; }
   if(!rRes.ok) throw `Roster lookup failed (HTTP ${rRes.status}).`;
   const roster = await rRes.json();
   return { searched: ch, roster };
@@ -643,7 +624,6 @@ function loadTag(charId){
 }
 function renderRoster(){
   const cards = state.players.map(p=>{
-    const you = p.id==="you";
     const chars = p.chars.map(c=>`
       <div class="char">
         ${roleGlyph(c.role)}
@@ -658,11 +638,11 @@ function renderRoster(){
         <button class="icon-btn" data-action="del-char" data-pid="${p.id}" data-cid="${c.id}" title="Remove">${SVG.trash}</button>
       </div>`).join("");
     return `
-      <div class="pcard ${you?'you':''}">
+      <div class="pcard">
         <div class="pcard-head">
           ${SVG.user}
-          <input class="pname" value="${esc(p.name)}" placeholder="Player name" data-field="player-name" data-pid="${p.id}" />
-          ${you?'<span class="you-badge">You</span>':`<button class="icon-btn" data-action="del-player" data-pid="${p.id}" title="Remove player">${SVG.trash}</button>`}
+          <input class="pname" value="${esc(p.name)}" placeholder="Roster name" data-field="player-name" data-pid="${p.id}" />
+          <button class="icon-btn" data-action="del-player" data-pid="${p.id}" title="Remove roster">${SVG.trash}</button>
         </div>
         ${chars || '<div class="empty-state">No characters yet.</div>'}
         <button class="btn full ghost" data-action="add-char" data-pid="${p.id}">${SVG.plus} Add character</button>
@@ -679,8 +659,8 @@ function renderRoster(){
         <input type="password" placeholder="x-api-key" value="${esc(state.apiKey)}" data-field="api-key" autocomplete="off" spellcheck="false" />
       </div>
     </div>
-    <div class="hint" style="margin:-6px 2px 16px">Add and edit characters here, or import a friend's whole roster with “Add a friend”. The badge on each character shows how many raids it's slotted into (max ${RAID_CAP}).</div>
-    <div class="roster-grid">${cards}</div>
+    <div class="hint" style="margin:-6px 2px 16px">Import a friend's whole roster with “Add a friend”, or add one by hand. The badge on each character shows how many raids it's slotted into (max ${RAID_CAP}).</div>
+    ${state.players.length ? `<div class="roster-grid">${cards}</div>` : `<div class="party-empty">No rosters yet. Add your API key above, then “Add a friend” to import one — or add a blank roster to enter manually.</div>`}
     <div class="add-player"><button class="btn gold" data-action="open-friend">${SVG.plus} Add a friend</button></div>`;
 }
 
@@ -838,8 +818,12 @@ function renderFriend(){
         <label>Character name</label>
         <input id="f-name" class="f-in" placeholder="e.g. Raineryaa" autocomplete="off" spellcheck="false" />
       </div>
+      <div class="fld">
+        <label>CORS proxy URL <span style="color:var(--dim)">— only if requests are blocked</span></label>
+        <input id="f-proxy" class="f-in" placeholder="https://your-worker.workers.dev" value="${esc(state.proxy)}" data-field="proxy-url" autocomplete="off" spellcheck="false" />
+      </div>
       <div class="f-status" id="f-status"></div>
-      <div class="f-note">Pulls every character on the roster, sets each role from its combat-power type, and shows combat power in DPS-red / support-green next to the name.</div>
+      <div class="f-note">Pulls every character on the roster, sets each role from its combat-power type, and shows combat power in DPS-red / support-green next to the name. If your browser blocks the API (CORS), paste your proxy URL above — see the deploy notes.</div>
     </div>
     <div class="modal-foot" style="justify-content:space-between">
       <button class="btn ghost" data-action="add-blank-friend">Add blank instead</button>
@@ -998,6 +982,7 @@ document.addEventListener("input", e=>{
   else if(f==="raid-req"){ const r=state.raids[+el.dataset.ri]; if(r) r.req=parseFloat(el.value)||0; }
   else if(f==="party-name"){ const p=state.parties.find(x=>x.id===el.dataset.party); if(p) p.name=el.value; }
   else if(f==="api-key"){ state.apiKey=el.value.trim(); saveApiKey(); const d=document.querySelector(".apikey-box span"); if(d) d.className=state.apiKey?'dotok':'dotno'; return; }
+  else if(f==="proxy-url"){ state.proxy=el.value.trim(); saveProxy(); return; }
   else return;
   save(true);
 });
@@ -1026,7 +1011,7 @@ document.addEventListener("keydown",e=>{
 /* =========================================================
    Boot
    ========================================================= */
-(async function(){ await loadApiKey(); await loadState(); render(); })();
+(async function(){ await loadApiKey(); await loadProxy(); await loadState(); render(); })();
 
 </script>
 </body>
