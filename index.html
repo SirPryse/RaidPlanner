@@ -632,21 +632,30 @@ async function boardPush(){
   }catch(e){ setSyncTag("Sync failed: "+e, true); }
   finally{ boardPushing=false; if(boardPushQueued){ boardPushQueued=false; boardPush(); } }
 }
-function boardStartPoll(){
-  clearInterval(boardPollTimer);
+async function boardPollTick(){
   if(board.mode==="off"||!board.id) return;
-  boardPollTimer=setInterval(async()=>{
-    if(boardPushing||boardDirty) return; // don't clobber pending local edits
-    try{
+  if(boardPushing||boardDirty) return;          // don't clobber pending local edits
+  try{
+    const meta = await boardApi("/board/"+encodeURIComponent(board.id)+"/meta");
+    const remote = (meta&&meta.updated_at)||0;
+    if(remote>board.lastUpdated){               // only fetch the full board when it actually changed
       const data = await boardApi("/board/"+encodeURIComponent(board.id));
-      const remote = (data.board&&data.board.updated_at)||0;
-      if(remote>board.lastUpdated){
-        boardApplying=true; applyBoardData(data); await save(true); boardApplying=false;
-        boardDirty=false; render(); renderSettings(); setSyncTag("Updated "+clockNow());
-      }
-    }catch(e){}
-  }, 20000);
+      boardApplying=true; applyBoardData(data); await save(true); boardApplying=false;
+      boardDirty=false; render(); renderSettings(); setSyncTag("Updated "+clockNow());
+    }
+  }catch(e){}
 }
+function boardStartPoll(){
+  clearInterval(boardPollTimer); boardPollTimer=null;
+  if(board.mode==="off"||!board.id) return;
+  if(document.hidden) return;                    // don't poll a hidden/background tab
+  boardPollTimer=setInterval(boardPollTick, 20000);
+}
+document.addEventListener("visibilitychange", ()=>{
+  if(board.mode==="off"||!board.id) return;
+  if(document.hidden){ clearInterval(boardPollTimer); boardPollTimer=null; }
+  else { boardPollTick(); boardStartPoll(); }    // catch up immediately on return, then resume
+});
 function clockNow(){ try{ return new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
 function setSyncTag(msg, err){ const el=document.getElementById("sync-tag"); if(el){ el.textContent=msg; el.className="sync-tag"+(err?" err":""); } }
 function boardDisconnect(){ clearInterval(boardPollTimer); Object.assign(board,{id:"",name:"",pw:"",mode:"off",lastUpdated:0}); persistBoard(); render(); renderSettings(); toast("Disconnected — using local copy"); }
