@@ -780,6 +780,9 @@ function loadTag(charId){
   return `<span class="brk${n===0?' none':''}">${n}/${RAID_CAP}</span>`;
 }
 function renderRoster(){
+  const scrolls = {};
+  document.querySelectorAll('.char-list[data-pid]').forEach(el=>{ scrolls[el.dataset.pid]=el.scrollTop; });
+  const winY = window.scrollY;
   const cards = state.players.map(p=>{
     const chars = p.chars.map(c=>`
       <div class="char">
@@ -807,7 +810,7 @@ function renderRoster(){
           ${p.rosterGuid?`<button class="icon-btn refresh-btn" data-action="refresh-roster" data-pid="${p.id}" title="Refresh whole roster from API" ${p.chars.some(c=>refreshing.has(c.id))?'disabled':''}>${p.chars.some(c=>refreshing.has(c.id))?`<span class="spin">${SVG.refresh}</span>`:SVG.refresh}</button>`:''}
           <button class="icon-btn" data-action="del-player" data-pid="${p.id}" title="Remove roster">${SVG.trash}</button>
         </div>
-        <div class="char-list">${chars || '<div class="empty-state">No characters yet.</div>'}</div>
+        <div class="char-list" data-pid="${p.id}">${chars || '<div class="empty-state">No characters yet.</div>'}</div>
         <button class="btn full ghost" data-action="add-char" data-pid="${p.id}">${SVG.plus} Add character</button>
       </div>`;
   }).join("");
@@ -825,6 +828,8 @@ function renderRoster(){
     <div class="hint" style="margin:-6px 2px 16px">Import a friend's whole roster with “Add a friend”, or add one by hand. The badge on each character shows how many raids it's slotted into (max ${RAID_CAP}).</div>
     ${state.players.length ? `<div class="roster-grid">${cards}</div>` : `<div class="party-empty">No rosters yet. Add your API key above, then “Add a friend” to import one — or add a blank roster to enter manually.</div>`}
     <div class="add-player"><button class="btn gold" data-action="open-friend">${SVG.plus} Add a friend</button></div>`;
+  document.querySelectorAll('.char-list[data-pid]').forEach(el=>{ if(scrolls[el.dataset.pid]!=null) el.scrollTop=scrolls[el.dataset.pid]; });
+  window.scrollTo(0, winY);
 }
 
 /* =========================================================
