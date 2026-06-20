@@ -1181,11 +1181,13 @@ function renderBuild(){
   const sel = (raidPick && state.raids.some(r=>r.label===raidPick)) ? raidPick : (state.raids[0]&&state.raids[0].label);
   const options = state.raids.map(r=>`<option value="${esc(r.label)}" ${r.label===sel?'selected':''}>${esc(r.label)} · ${r.teams===2?'8-man':'4-man'} · ≥${r.req||0}</option>`).join("");
   const activeFilter = partyFilter.size>0;
-  const partyMatches = pt => !activeFilter || pt.slots.some(sl=>{
-    if(!sl.charId) return false;
-    const c = charById(sl.charId);
-    return c && partyFilter.has(c.ownerId);
-  });
+  const partyMatches = pt => {
+    if(!activeFilter) return true;
+    const owners = new Set();
+    pt.slots.forEach(sl=>{ if(sl.charId){ const c=charById(sl.charId); if(c) owners.add(c.ownerId); } });
+    for(const pid of partyFilter){ if(!owners.has(pid)) return false; } // every selected roster must be present
+    return true;
+  };
   let parties;
   if(!state.parties.length){
     parties = `<div class="party-empty">No parties yet. Pick a raid above and press “Add party”, then tap a slot to drop in a character.</div>`;
