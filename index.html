@@ -92,8 +92,10 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
   border:1px solid var(--gold-dim);border-radius:5px;padding:2px 6px;text-transform:uppercase}
 .icon-btn{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--dim);transition:.14s}
 .icon-btn:hover{color:var(--dps);background:rgba(229,72,77,.1)}
-.char{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line-soft);
-  border-radius:var(--r-sm);padding:7px 8px}
+.char{display:flex;flex-direction:column;gap:7px;background:var(--panel2);border:1px solid var(--line-soft);
+  border-radius:var(--r-sm);padding:8px}
+.char-top{display:flex;align-items:center;gap:8px;min-width:0}
+.char-bot{display:flex;align-items:center;gap:8px}
 .glyph{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;flex-shrink:0}
 .glyph.dps{background:var(--dps-soft);color:var(--dps);box-shadow:inset 0 0 0 1px var(--dps-line)}
 .glyph.sup{background:var(--sup-soft);color:var(--sup);box-shadow:inset 0 0 0 1px var(--sup-line)}
@@ -101,15 +103,21 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .cp{font-family:var(--data);font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0}
 .cp.dps{color:var(--dps)} .cp.sup{color:var(--sup)}
 .cname:focus{outline:none;background:rgba(255,255,255,.03);border-radius:4px}
-.ilvl-in{width:64px;background:var(--bg);border:1px solid var(--line);border-radius:6px;
-  font-family:var(--data);font-size:13px;text-align:right;padding:4px 7px;color:var(--text)}
+.ilvl-in{width:78px;flex:0 0 auto;background:var(--bg);border:1px solid var(--line);border-radius:6px;
+  font-family:var(--data);font-size:13px;text-align:left;padding:4px 7px;color:var(--text)}
 .ilvl-in:focus{outline:none;border-color:var(--gold-dim)}
 .role-sel{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:4px 6px;
-  font-size:12px;color:var(--muted)}
+  font-size:12px;color:var(--muted);flex:0 0 auto}
 .role-sel:focus{outline:none;border-color:var(--gold-dim)}
-.brk{font-family:var(--data);font-size:10.5px;color:var(--dim);white-space:nowrap;min-width:40px;text-align:right}
+.brk{font-family:var(--data);font-size:10.5px;color:var(--dim);white-space:nowrap;text-align:right;margin-left:auto}
 .brk.none{color:var(--dps)}
-.char .icon-btn{width:24px;height:24px}
+.char .icon-btn{width:24px;height:24px;flex:0 0 auto}
+.char-list{display:flex;flex-direction:column;gap:8px;max-height:30rem;overflow-y:auto;
+  padding-right:3px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.char-list::-webkit-scrollbar{width:8px}
+.char-list::-webkit-scrollbar-track{background:transparent}
+.char-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:8px}
+.char-list::-webkit-scrollbar-thumb:hover{background:#3a3f52}
 .addrow{display:flex;gap:8px;margin-top:2px}
 .btn{display:inline-flex;align-items:center;gap:7px;border-radius:9px;padding:8px 13px;
   font-weight:600;font-size:13px;border:1px solid var(--line);background:var(--panel2);
@@ -205,10 +213,13 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
   border:1px solid var(--line);color:var(--dim);background:var(--bg);transition:.13s;font-family:var(--data)}
 .rchip.on{color:var(--gold-bright);border-color:var(--gold-dim);background:rgba(217,180,91,.08)}
 .rchip:hover{border-color:#3a3f52}
-.raidrow{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.raidrow input{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:13px}
+.raidrow{display:flex;flex-direction:column;gap:7px;margin-bottom:9px;
+  background:var(--panel2);border:1px solid var(--line-soft);border-radius:9px;padding:9px}
+.rr-top{display:flex;align-items:center;gap:8px}
+.rr-bot{display:flex;align-items:center;gap:8px}
+.raidrow input{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font-size:13px}
 .raidrow input:focus{outline:none;border-color:var(--gold-dim)}
-.raidrow select{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12.5px}
+.raidrow select{background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px 8px;font-size:12.5px;flex:0 0 auto}
 .danger{color:var(--dps);border-color:var(--dps-line)}
 .danger:hover{background:var(--dps-soft)}
 .close-x{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
@@ -240,10 +251,9 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .brow.bad{border-color:var(--amber);box-shadow:inset 0 0 0 1px rgba(224,169,59,.25)}
 .brk-warn{display:flex;gap:7px;align-items:flex-start;margin-top:10px;color:var(--amber);font-size:12px;line-height:1.45}
 .brk-warn svg{flex-shrink:0;margin-top:1px}
-.req-in{width:62px;flex:none!important;text-align:right;font-family:var(--data)}
-.raidrow{flex-wrap:wrap}
-.raidrow input.lbl-in{flex:1 1 130px;min-width:118px}
-.raidrow input.fam-in{flex:0 0 98px;width:98px;font-size:12.5px}
+.req-in{width:64px;flex:none!important;text-align:right;font-family:var(--data)}
+.rr-top .lbl-in{flex:1 1 auto;min-width:0}
+.rr-bot .fam-in{flex:1 1 auto;min-width:0;font-size:12.5px}
 .raidrow.head{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
   font-family:var(--data);padding:0 2px;margin-bottom:0}
 .raidrow.head span:first-child{flex:1}
@@ -328,7 +338,7 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 
 /* ---------- api key + friend import ---------- */
 .apikey-box{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);
-  border-radius:10px;padding:7px 10px}
+  border-radius:10px;padding:7px 10px;margin-left:auto;align-self:center}
 .apikey-box label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-family:var(--data)}
 .apikey-box input{background:var(--bg);border:1px solid var(--line);border-radius:7px;padding:6px 9px;
   font-family:var(--data);font-size:12.5px;color:var(--text);width:150px}
@@ -626,16 +636,20 @@ function renderRoster(){
   const cards = state.players.map(p=>{
     const chars = p.chars.map(c=>`
       <div class="char">
-        ${roleGlyph(c.role)}
-        <input class="cname" value="${esc(c.name)}" placeholder="Character" data-field="char-name" data-pid="${p.id}" data-cid="${c.id}" />
-        ${c.cp!=null?`<span class="cp ${c.role}" title="Combat power">${fmtCp(c.cp)}</span>`:''}
-        <input class="ilvl-in" type="number" step="0.01" value="${esc(c.ilvl)}" data-field="char-ilvl" data-pid="${p.id}" data-cid="${c.id}" />
-        <select class="role-sel" data-field="char-role" data-pid="${p.id}" data-cid="${c.id}">
-          <option value="dps" ${c.role==='dps'?'selected':''}>DPS</option>
-          <option value="sup" ${c.role==='sup'?'selected':''}>SUP</option>
-        </select>
-        ${loadTag(c.id)}
-        <button class="icon-btn" data-action="del-char" data-pid="${p.id}" data-cid="${c.id}" title="Remove">${SVG.trash}</button>
+        <div class="char-top">
+          ${roleGlyph(c.role)}
+          <input class="cname" value="${esc(c.name)}" placeholder="Character" data-field="char-name" data-pid="${p.id}" data-cid="${c.id}" />
+          ${c.cp!=null?`<span class="cp ${c.role}" title="Combat power">${fmtCp(c.cp)}</span>`:''}
+        </div>
+        <div class="char-bot">
+          <input class="ilvl-in" type="number" step="0.01" value="${esc(c.ilvl)}" data-field="char-ilvl" data-pid="${p.id}" data-cid="${c.id}" />
+          <select class="role-sel" data-field="char-role" data-pid="${p.id}" data-cid="${c.id}">
+            <option value="dps" ${c.role==='dps'?'selected':''}>DPS</option>
+            <option value="sup" ${c.role==='sup'?'selected':''}>SUP</option>
+          </select>
+          ${loadTag(c.id)}
+          <button class="icon-btn" data-action="del-char" data-pid="${p.id}" data-cid="${c.id}" title="Remove">${SVG.trash}</button>
+        </div>
       </div>`).join("");
     return `
       <div class="pcard">
@@ -644,7 +658,7 @@ function renderRoster(){
           <input class="pname" value="${esc(p.name)}" placeholder="Roster name" data-field="player-name" data-pid="${p.id}" />
           <button class="icon-btn" data-action="del-player" data-pid="${p.id}" title="Remove roster">${SVG.trash}</button>
         </div>
-        ${chars || '<div class="empty-state">No characters yet.</div>'}
+        <div class="char-list">${chars || '<div class="empty-state">No characters yet.</div>'}</div>
         <button class="btn full ghost" data-action="add-char" data-pid="${p.id}">${SVG.plus} Add character</button>
       </div>`;
   }).join("");
@@ -863,14 +877,18 @@ async function importFriend(){
 function renderSettings(){
   const raids = state.raids.map((r,ri)=>`
     <div class="raidrow">
-      <input class="lbl-in" value="${esc(r.label)}" data-field="raid-label" data-ri="${ri}" placeholder="Raid name" />
-      <input class="fam-in" value="${esc(r.family||'')}" data-field="raid-family" data-ri="${ri}" placeholder="Family" title="Group difficulties of the same raid under one family" />
-      <input class="req-in" type="number" value="${esc(r.req||'')}" data-field="raid-req" data-ri="${ri}" title="Item level required" placeholder="ilvl" />
-      <select data-field="raid-teams" data-ri="${ri}">
-        <option value="1" ${r.teams===1?'selected':''}>4-man</option>
-        <option value="2" ${r.teams===2?'selected':''}>8-man</option>
-      </select>
-      <button class="icon-btn" data-action="del-raid" data-ri="${ri}" title="Remove raid">${SVG.trash}</button>
+      <div class="rr-top">
+        <input class="lbl-in" value="${esc(r.label)}" data-field="raid-label" data-ri="${ri}" placeholder="Raid name" />
+        <button class="icon-btn" data-action="del-raid" data-ri="${ri}" title="Remove raid">${SVG.trash}</button>
+      </div>
+      <div class="rr-bot">
+        <input class="fam-in" value="${esc(r.family||'')}" data-field="raid-family" data-ri="${ri}" placeholder="Family" title="Group difficulties of the same raid under one family" />
+        <input class="req-in" type="number" value="${esc(r.req||'')}" data-field="raid-req" data-ri="${ri}" title="Item level required" placeholder="ilvl" />
+        <select data-field="raid-teams" data-ri="${ri}">
+          <option value="1" ${r.teams===1?'selected':''}>4-man</option>
+          <option value="2" ${r.teams===2?'selected':''}>8-man</option>
+        </select>
+      </div>
     </div>`).join("");
 
   const reqRef = REQ_TABLE.map(g=>`
