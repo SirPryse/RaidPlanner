@@ -709,6 +709,8 @@ const SVG = {
   x:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
   refresh:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>',
   arrowL:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>',
+  up:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>',
+  down:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
   arrowR:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>',
 };
 // Official Lost Ark class names, keyed by the API's class string.
@@ -1184,6 +1186,8 @@ function renderSettings(){
     <div class="raidrow">
       <div class="rr-top">
         <input class="lbl-in" value="${esc(r.label)}" data-field="raid-label" data-ri="${ri}" placeholder="Raid name" />
+        <button class="icon-btn" data-action="move-raid-up" data-ri="${ri}" title="Move up" ${ri===0?'disabled':''}>${SVG.up}</button>
+        <button class="icon-btn" data-action="move-raid-down" data-ri="${ri}" title="Move down" ${ri===state.raids.length-1?'disabled':''}>${SVG.down}</button>
         <button class="icon-btn" data-action="del-raid" data-ri="${ri}" title="Remove raid">${SVG.trash}</button>
       </div>
       <div class="rr-bot">
@@ -1202,6 +1206,8 @@ function renderSettings(){
       <div class="reqdiffs">${g.diffs.map(d=>`<span class="reqd"><i>${d[0]}</i><b>${d[1]}</b></span>`).join("")}</div>
     </div>`).join("");
 
+  const dEl = document.getElementById("drawer");
+  const dScroll = dEl ? dEl.scrollTop : 0;
   document.getElementById("drawer-in").innerHTML = `
     <div class="drawer-head">
       <span class="t">Raids &amp; Gates</span>
@@ -1220,6 +1226,7 @@ function renderSettings(){
     <h3>Data</h3>
     <p class="note">Everything saves automatically on this device.</p>
     <button class="btn danger full" data-action="reset-data">Reset to defaults</button>`;
+  if(dEl) dEl.scrollTop = dScroll;
 }
 
 /* =========================================================
@@ -1326,6 +1333,16 @@ document.addEventListener("click", e=>{
 
     case "add-raid": state.raids.push({label:"New Raid",teams:1,req:0,family:""}); save(); renderSettings(); break;
     case "del-raid": state.raids.splice(+el.dataset.ri,1); save(); renderSettings(); render(); break;
+    case "move-raid-up":{
+      const i=+el.dataset.ri;
+      if(i>0){ const a=state.raids; [a[i-1],a[i]]=[a[i],a[i-1]]; save(); renderSettings(); render(); }
+      break;
+    }
+    case "move-raid-down":{
+      const i=+el.dataset.ri;
+      if(i<state.raids.length-1){ const a=state.raids; [a[i],a[i+1]]=[a[i+1],a[i]]; save(); renderSettings(); render(); }
+      break;
+    }
     case "reset-data": applyDefaults(); save(); renderSettings(); render(); break;
   }
 });
