@@ -234,6 +234,10 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
   font-size:12px;font-weight:600;padding:8px 16px;border-radius:999px;z-index:50;
   opacity:0;transition:.2s;letter-spacing:.03em}
 .savetag.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.savetag.err{border-color:var(--dps-line);color:var(--dps)}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spin{display:inline-flex;animation:spin .8s linear infinite}
+.refresh-btn:hover{color:var(--teal)!important;background:rgba(86,194,214,.12)!important}
 
 /* item-level gates + requirement reference + validation */
 .req-badge{font-family:var(--data);font-size:11px;color:var(--muted);border:1px solid var(--line);
@@ -358,6 +362,31 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .f-status .f-err svg{flex-shrink:0;margin-top:1px}
 .f-status .f-load{color:var(--teal);font-family:var(--data)}
 .f-note{font-size:11.5px;color:var(--dim);line-height:1.45}
+.modal.wide{width:min(640px,96vw)}
+.xfer{display:flex;gap:10px;align-items:stretch}
+.xfer-col{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--line-soft);
+  border-radius:10px;display:flex;flex-direction:column;overflow:hidden}
+.xfer-head{padding:8px 11px;font-family:var(--data);font-size:11px;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--muted);border-bottom:1px solid var(--line-soft);display:flex;justify-content:space-between;align-items:center}
+.xfer-head .n{color:var(--gold-bright);font-weight:600}
+.xfer-list{max-height:300px;min-height:120px;overflow-y:auto;padding:6px;display:flex;flex-direction:column;gap:5px;
+  scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+.xfer-list::-webkit-scrollbar{width:7px}
+.xfer-list::-webkit-scrollbar-thumb{background:var(--line);border-radius:7px}
+.xfer-item{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:7px;cursor:pointer;
+  background:var(--bg);border:1px solid var(--line);transition:.12s}
+.xfer-item:hover{border-color:var(--gold-dim);background:rgba(217,180,91,.05)}
+.xfer-item .nm{flex:1;min-width:0;font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.xfer-item .il{font-family:var(--data);font-size:11px;color:var(--muted)}
+.xfer-empty{color:var(--dim);font-style:italic;font-size:12px;padding:18px 8px;text-align:center}
+.xfer-arrows{display:flex;flex-direction:column;justify-content:center;gap:10px;flex-shrink:0}
+.xfer-arrows button{width:34px;height:34px;border-radius:8px;border:1px solid var(--line);
+  background:var(--panel);color:var(--muted);display:grid;place-items:center;transition:.13s}
+.xfer-arrows button:hover{color:var(--gold-bright);border-color:var(--gold-dim);background:rgba(217,180,91,.06)}
+@media (max-width:560px){
+  .xfer{flex-direction:column}
+  .xfer-arrows{flex-direction:row;justify-content:center}
+}
 
 @media (max-width:560px){
   .apikey-box input{width:110px}
@@ -431,6 +460,8 @@ const DEFAULT_PLAYERS = [];
 
 let state = { tab:"roster", players:null, raids:null, parties:null, apiKey:"", proxy:"" };
 let pick = null; // active picker target {partyId, slotIdx}
+const refreshing = new Set(); // character ids currently being refreshed
+let friendDraft = null; // { pname, region, rosterGuid, add:[], skip:[] } during import selection
 
 /* =========================================================
    Persistence
@@ -519,10 +550,54 @@ async function fetchRoster(region, name){
   const roster = await rRes.json();
   return { searched: ch, roster };
 }
-function flashSaved(){
-  const t=document.getElementById("savetag"); t.classList.add("show");
-  clearTimeout(saveTimer); saveTimer=setTimeout(()=>t.classList.remove("show"),1100);
+// Pull one character's current stats by region + name.
+async function fetchCharacter(region, name){
+  if(!state.apiKey) throw "Set your API key first (top-right of the Roster tab).";
+  let res;
+  try{ res = await fetch(apiUrl(`/characters/by-name/${encodeURIComponent(region)}/${encodeURIComponent(name)}`), { headers:{ "x-api-key":state.apiKey } }); }
+  catch(e){ throw "Couldn't reach the API — likely CORS. Set a proxy URL in Add a friend."; }
+  if(res.status===401 || res.status===403) throw "API key was rejected.";
+  if(res.status===404) throw `“${name}” not found in ${region}.`;
+  if(!res.ok) throw `Lookup failed (HTTP ${res.status}).`;
+  return await res.json();
 }
+function applyApiChar(c, data){ c.ilvl=round2(data.item_level); c.role=roleFromApi(data); c.cp=cpOf(data); }
+async function refreshChar(pid, cid){
+  if(refreshing.has(cid)) return;
+  const p=findPlayer(pid); const c=p && p.chars.find(x=>x.id===cid); if(!c) return;
+  if(!state.apiKey){ toast("Set your API key first", true); return; }
+  if(!p.region){ toast("No region stored — re-import this roster to refresh", true); return; }
+  refreshing.add(cid); renderRoster();
+  try{
+    const data = await fetchCharacter(p.region, c.name);
+    applyApiChar(c, data); save(true); toast("Updated "+c.name);
+  }catch(e){ toast(typeof e==="string"?e:"Refresh failed", true); }
+  finally{ refreshing.delete(cid); renderRoster(); renderStats(); }
+}
+async function refreshRoster(pid){
+  const p=findPlayer(pid); if(!p) return;
+  if(p.chars.some(c=>refreshing.has(c.id))) return;
+  if(!state.apiKey){ toast("Set your API key first", true); return; }
+  if(!p.rosterGuid){ toast("No roster id stored — re-import to refresh all", true); return; }
+  p.chars.forEach(c=>refreshing.add(c.id)); renderRoster();
+  try{
+    let res;
+    try{ res = await fetch(apiUrl(`/rosters/by-guid/${encodeURIComponent(p.rosterGuid)}`), { headers:{ "x-api-key":state.apiKey } }); }
+    catch(e){ throw "Couldn't reach the API — likely CORS."; }
+    if(!res.ok) throw `Roster refresh failed (HTTP ${res.status}).`;
+    const roster = await res.json();
+    const byName={}; (roster.characters||[]).forEach(rc=>{ if(rc&&rc.name) byName[rc.name]=rc; });
+    let n=0; p.chars.forEach(c=>{ const rc=byName[c.name]; if(rc){ applyApiChar(c, rc); n++; } });
+    save(true); toast(`Refreshed ${n} character${n===1?'':'s'}`);
+  }catch(e){ toast(typeof e==="string"?e:"Refresh failed", true); }
+  finally{ p.chars.forEach(c=>refreshing.delete(c.id)); renderRoster(); renderStats(); }
+}
+function toast(msg, err){
+  const t=document.getElementById("savetag");
+  t.textContent=msg; t.classList.toggle("err", !!err); t.classList.add("show");
+  clearTimeout(saveTimer); saveTimer=setTimeout(()=>t.classList.remove("show"), err?2800:1100);
+}
+function flashSaved(){ toast("Saved", false); }
 const clone = o => JSON.parse(JSON.stringify(o));
 const uid = () => Math.random().toString(36).slice(2,9);
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
@@ -604,6 +679,9 @@ const SVG = {
   trash:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/></svg>',
   user:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
   x:'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+  refresh:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/><path d="M3 21v-5h5"/></svg>',
+  arrowL:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>',
+  arrowR:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>',
 };
 const roleGlyph = (role,dash) => `<span class="glyph ${role}${dash?' dash':''}">${role==='dps'?SVG.sword:SVG.leaf}</span>`;
 const warnIcon=()=>'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z"/></svg>';
@@ -648,6 +726,7 @@ function renderRoster(){
             <option value="sup" ${c.role==='sup'?'selected':''}>SUP</option>
           </select>
           ${loadTag(c.id)}
+          ${p.region?`<button class="icon-btn refresh-btn" data-action="refresh-char" data-pid="${p.id}" data-cid="${c.id}" title="Refresh from API" ${refreshing.has(c.id)?'disabled':''}>${refreshing.has(c.id)?`<span class="spin">${SVG.refresh}</span>`:SVG.refresh}</button>`:''}
           <button class="icon-btn" data-action="del-char" data-pid="${p.id}" data-cid="${c.id}" title="Remove">${SVG.trash}</button>
         </div>
       </div>`).join("");
@@ -656,6 +735,7 @@ function renderRoster(){
         <div class="pcard-head">
           ${SVG.user}
           <input class="pname" value="${esc(p.name)}" placeholder="Roster name" data-field="player-name" data-pid="${p.id}" />
+          ${p.rosterGuid?`<button class="icon-btn refresh-btn" data-action="refresh-roster" data-pid="${p.id}" title="Refresh whole roster from API" ${p.chars.some(c=>refreshing.has(c.id))?'disabled':''}>${p.chars.some(c=>refreshing.has(c.id))?`<span class="spin">${SVG.refresh}</span>`:SVG.refresh}</button>`:''}
           <button class="icon-btn" data-action="del-player" data-pid="${p.id}" title="Remove roster">${SVG.trash}</button>
         </div>
         <div class="char-list">${chars || '<div class="empty-state">No characters yet.</div>'}</div>
@@ -812,8 +892,13 @@ function renderPicker(){
    ========================================================= */
 const REGIONS = ["CE","NAE","NAW","NA"];
 function renderFriend(){
+  const m = document.getElementById("fmodal");
+  m.classList.toggle("wide", !!friendDraft);
+  m.innerHTML = friendDraft ? friendSelectHTML() : friendSearchHTML();
+}
+function friendSearchHTML(){
   const hasKey = !!(state.apiKey && state.apiKey.length);
-  document.getElementById("fmodal").innerHTML = `
+  return `
     <div class="modal-head">
       ${SVG.user}
       <div style="flex:1;min-width:0">
@@ -837,15 +922,56 @@ function renderFriend(){
         <input id="f-proxy" class="f-in" placeholder="https://your-worker.workers.dev" value="${esc(state.proxy)}" data-field="proxy-url" autocomplete="off" spellcheck="false" />
       </div>
       <div class="f-status" id="f-status"></div>
-      <div class="f-note">Pulls every character on the roster, sets each role from its combat-power type, and shows combat power in DPS-red / support-green next to the name. If your browser blocks the API (CORS), paste your proxy URL above — see the deploy notes.</div>
+      <div class="f-note">Fetches the roster, then lets you choose which characters to add. Roles come from each character's combat-power type. If your browser blocks the API (CORS), paste your proxy URL above.</div>
     </div>
     <div class="modal-foot" style="justify-content:space-between">
       <button class="btn ghost" data-action="add-blank-friend">Add blank instead</button>
       <button class="btn gold" data-action="fetch-roster" id="f-go">Fetch roster</button>
     </div>`;
 }
-function openFriend(){ renderFriend(); document.getElementById("fscrim").classList.add("open"); setTimeout(()=>{ const n=document.getElementById("f-name"); if(n) n.focus(); },60); }
-function closeFriend(){ document.getElementById("fscrim").classList.remove("open"); }
+function xferItem(c){
+  return `<div class="xfer-item" data-action="friend-toggle" data-cid="${c.id}" title="Tap to move">
+      ${roleGlyph(c.role)}
+      <span class="nm">${esc(c.name)}</span>
+      ${c.cp!=null?`<span class="cp ${c.role}">${fmtCp(c.cp)}</span>`:''}
+      <span class="il">${fmtIl(c.ilvl)}</span></div>`;
+}
+function friendSelectHTML(){
+  const byIl = arr => arr.slice().sort((a,b)=>b.ilvl-a.ilvl);
+  const add = byIl(friendDraft.add), skip = byIl(friendDraft.skip);
+  return `
+    <div class="modal-head">
+      ${SVG.user}
+      <div style="flex:1;min-width:0">
+        <div class="mt">Select characters</div>
+        <div class="ms">${esc(friendDraft.pname)} · ${esc(friendDraft.region)} · tap a name to move it</div>
+      </div>
+      <button class="close-x" data-action="close-friend">${SVG.x}</button>
+    </div>
+    <div class="fbody">
+      <div class="xfer">
+        <div class="xfer-col">
+          <div class="xfer-head"><span>Add</span><span class="n">${add.length}</span></div>
+          <div class="xfer-list">${add.length?add.map(xferItem).join(""):'<div class="xfer-empty">Nothing selected yet</div>'}</div>
+        </div>
+        <div class="xfer-arrows">
+          <button data-action="friend-all-add" title="Add all">${SVG.arrowL}</button>
+          <button data-action="friend-all-skip" title="Move all to don't add">${SVG.arrowR}</button>
+        </div>
+        <div class="xfer-col">
+          <div class="xfer-head"><span>Don't add</span><span class="n">${skip.length}</span></div>
+          <div class="xfer-list">${skip.length?skip.map(xferItem).join(""):'<div class="xfer-empty">Empty</div>'}</div>
+        </div>
+      </div>
+      <div class="f-status" id="f-status"></div>
+    </div>
+    <div class="modal-foot" style="justify-content:space-between">
+      <button class="btn ghost" data-action="friend-back">Back</button>
+      <button class="btn gold" data-action="friend-confirm">Add ${add.length} to roster</button>
+    </div>`;
+}
+function openFriend(){ friendDraft=null; renderFriend(); document.getElementById("fscrim").classList.add("open"); setTimeout(()=>{ const n=document.getElementById("f-name"); if(n) n.focus(); },60); }
+function closeFriend(){ friendDraft=null; document.getElementById("fscrim").classList.remove("open"); document.getElementById("fmodal").classList.remove("wide"); }
 function fErr(msg){ return `<div class="f-err">${warnIcon()}<span>${esc(msg)}</span></div>`; }
 async function importFriend(){
   const regionEl=document.getElementById("f-region"), nameEl=document.getElementById("f-name");
@@ -862,9 +988,14 @@ async function importFriend(){
       .map(c=>({ id:uid(), name:c.name, ilvl:round2(c.item_level), role:roleFromApi(c), cp:cpOf(c) }))
       .sort((a,b)=>b.ilvl-a.ilvl);
     if(!chars.length){ statusEl.innerHTML=fErr("That roster came back with no characters."); go.disabled=false; return; }
-    const pname = (searched && searched.name) ? searched.name : name;
-    state.players.push({ id:uid(), name:pname, chars });
-    save(); closeFriend(); renderRoster(); renderStats();
+    friendDraft = {
+      pname: (searched && searched.name) ? searched.name : name,
+      region: (roster.region||region||"").toUpperCase(),
+      rosterGuid: roster.guid||"",
+      add: chars,
+      skip: []
+    };
+    renderFriend(); // -> selection step
   }catch(e){
     statusEl.innerHTML=fErr(typeof e==="string"?e:((e&&e.message)||"Request failed."));
     if(go) go.disabled=false;
@@ -942,6 +1073,22 @@ document.addEventListener("click", e=>{
     case "open-friend": openFriend(); break;
     case "close-friend": closeFriend(); break;
     case "fetch-roster": importFriend(); break;
+    case "friend-toggle":{
+      if(!friendDraft) break;
+      const cid=el.dataset.cid; let i=friendDraft.add.findIndex(c=>c.id===cid);
+      if(i>=0){ friendDraft.skip.push(friendDraft.add.splice(i,1)[0]); }
+      else{ i=friendDraft.skip.findIndex(c=>c.id===cid); if(i>=0) friendDraft.add.push(friendDraft.skip.splice(i,1)[0]); }
+      renderFriend(); break;
+    }
+    case "friend-all-add": if(friendDraft){ friendDraft.add.push(...friendDraft.skip); friendDraft.skip=[]; renderFriend(); } break;
+    case "friend-all-skip": if(friendDraft){ friendDraft.skip.push(...friendDraft.add); friendDraft.add=[]; renderFriend(); } break;
+    case "friend-back": friendDraft=null; renderFriend(); break;
+    case "friend-confirm":{
+      if(!friendDraft) break;
+      if(!friendDraft.add.length){ const s=document.getElementById("f-status"); if(s) s.innerHTML=fErr("Pick at least one character to add."); break; }
+      state.players.push({ id:uid(), name:friendDraft.pname, region:friendDraft.region, rosterGuid:friendDraft.rosterGuid, chars:friendDraft.add });
+      friendDraft=null; save(); closeFriend(); renderRoster(); renderStats(); break;
+    }
     case "add-blank-friend":
       state.players.push({id:uid(),name:"New friend",chars:[{id:uid(),name:"Character",ilvl:1710,role:"dps"}]});
       save(); closeFriend(); renderRoster(); renderStats(); break;
@@ -961,6 +1108,8 @@ document.addEventListener("click", e=>{
       const p=findPlayer(el.dataset.pid);
       if(p){ purgeChar(el.dataset.cid); p.chars=p.chars.filter(c=>c.id!==el.dataset.cid); save(); renderRoster(); renderStats(); } break;
     }
+    case "refresh-char": refreshChar(el.dataset.pid, el.dataset.cid); break;
+    case "refresh-roster": refreshRoster(el.dataset.pid); break;
 
     case "add-party":{
       const label=document.getElementById("raid-pick").value;
