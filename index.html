@@ -112,7 +112,9 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
   font-size:12px;color:var(--muted);flex:0 0 auto}
 .role-sel:focus{outline:none;border-color:var(--gold-dim)}
 .brk{font-family:var(--data);font-size:10.5px;color:var(--dim);white-space:nowrap;text-align:right;margin-left:auto}
-.brk.none{color:var(--dps)}
+.brk.low{color:var(--dps)}
+.brk.full{color:var(--sup)}
+.brk.over{color:var(--amber)}
 .char .icon-btn{width:24px;height:24px;flex:0 0 auto}
 .char-list{display:flex;flex-direction:column;gap:8px;max-height:30rem;overflow-y:auto;
   padding-right:3px;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
@@ -511,7 +513,7 @@ const REQ_TABLE = [
   { family:"Serca",     diffs:[["Normal",1710],["Hard",1730],["Nightmare",1740]] },
   { family:"Cathedral", diffs:[["Normal",1700],["Hard",1720],["Nightmare",1750]] },
 ];
-const RAID_CAP = 3; // each character may run at most 3 raids per week
+const RAID_CAP = 3; // weekly raid target per character (not enforced — drives the load badge colour)
 
 const DEFAULT_PLAYERS = [];
 
@@ -878,7 +880,6 @@ function blockReasons(char, party, raid, slotRole){
   const fkRaw = familyKey(raid || party.raidLabel);
   const fk = famNorm(fkRaw);
   if(fk && fams.has(fk)) reasons.push("Already on "+fkRaw);
-  else if(fams.size>=RAID_CAP) reasons.push("At "+RAID_CAP+"-raid cap");
   return reasons;
 }
 function purgeChar(charId){
@@ -997,7 +998,8 @@ function renderStats(){
    ========================================================= */
 function loadTag(charId){
   const n=charRaidCount(charId);
-  return `<span class="brk${n===0?' none':''}">${n}/${RAID_CAP}</span>`;
+  const cls = n>RAID_CAP ? 'over' : (n===RAID_CAP ? 'full' : 'low');
+  return `<span class="brk ${cls}" title="${n} of ${RAID_CAP} weekly raids">${n}/${RAID_CAP}</span>`;
 }
 function charRowHTML(p, c){
   return `
@@ -1055,7 +1057,7 @@ function renderRoster(){
         <input type="password" placeholder="x-api-key" value="${esc(state.apiKey)}" data-field="api-key" autocomplete="off" spellcheck="false" />
       </div>
     </div>
-    <div class="hint" style="margin:-6px 2px 16px">Import a friend's whole roster with “Add a friend”, or add one by hand. The badge on each character shows how many raids it's slotted into (max ${RAID_CAP}).</div>
+    <div class="hint" style="margin:-6px 2px 16px">Import a friend's whole roster with “Add a friend”, or add one by hand. The badge on each character shows how many raids it's slotted into — red under ${RAID_CAP}, green at ${RAID_CAP}, yellow above.</div>
     ${state.players.length ? `<div class="roster-grid">${cards}</div>` : `<div class="party-empty">No rosters yet. Add your API key above, then “Add a friend” to import one — or add a blank roster to enter manually.</div>`}
     <div class="add-player"><button class="btn gold" data-action="open-friend">${SVG.plus} Add a friend</button></div>`;
   document.querySelectorAll('.char-list[data-pid]').forEach(el=>{ if(scrolls[el.dataset.pid]!=null) el.scrollTop=scrolls[el.dataset.pid]; });
@@ -1188,7 +1190,7 @@ function renderBuild(){
   document.getElementById("view").innerHTML = `
     <div class="section-head">
       <div><div class="eyebrow">The War Table</div><h2>Build your parties</h2></div>
-      <div class="hint">Tap any slot to assign a character. The picker only offers valid choices — right role, meets the item-level gate, one roster per party, max ${RAID_CAP} raids each, one difficulty per raid. Empty slots are your PUG / BOT fills.</div>
+      <div class="hint">Tap any slot to assign a character. The picker only offers valid choices — right role, meets the item-level gate, one roster per party, one difficulty per raid. ${RAID_CAP} raids/week is the target (the load badge turns yellow past it, not blocked). Empty slots are your PUG / BOT fills.</div>
     </div>
     <div class="build-bar">
       <span class="lbl">Raid</span>
@@ -1411,7 +1413,7 @@ function renderSettings(){
     <div class="reqgrid">${reqRef}</div>
 
     <h3>Raids</h3>
-    <p class="note">Name, family, item-level gate and size for each raid in the “Add party” menu. <b>Family</b> is what links a raid's difficulties: give every Serca tier the family “Serca” and a character can only do one of them, and it counts as one of their ${RAID_CAP} raids. Leave Family blank and the raid stands on its own (its name becomes its family).</p>
+    <p class="note">Name, family, item-level gate and size for each raid in the “Add party” menu. <b>Family</b> is what links a raid's difficulties: give every Serca tier the family “Serca” and a character can only do one of them, and it counts as one raid toward their weekly total. Leave Family blank and the raid stands on its own (its name becomes its family).</p>
     ${raids}
     <button class="btn ghost full" data-action="add-raid">${SVG.plus} Add raid</button>
 
