@@ -272,6 +272,11 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
   font-size:14px;color:var(--text);min-width:170px}
 .raid-pick:focus{outline:none;border-color:var(--gold-dim)}
 .party-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px;align-items:start;margin-bottom:8px}
+.raidgroup{margin-bottom:18px}
+.raidgroup-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
+  padding:0 2px 9px;margin-bottom:11px;border-bottom:1px solid var(--line-soft)}
+.rg-name{font-family:var(--display);font-size:17px;font-weight:700;letter-spacing:.02em;color:var(--gold-bright)}
+.rg-meta{font-family:var(--data);font-size:11.5px;color:var(--dim)}
 .party{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
 .party-head{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--line-soft)}
 .pname2{flex:1;background:transparent;border:none;border-bottom:1px dashed transparent;font-family:var(--display);
@@ -303,21 +308,32 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .party .foot{margin-top:9px;padding-top:8px}
 .party .diag{font-size:11.5px}
 .party-empty{color:var(--dim);font-style:italic;font-size:13.5px;padding:18px 2px;text-align:center}
-.loadpanel{margin-top:6px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
-.loadpanel summary{cursor:pointer;padding:13px 16px;font-weight:600;font-size:14px;color:var(--muted);list-style:none}
-.loadpanel summary::-webkit-details-marker{display:none}
-.loadpanel summary:hover{color:var(--text)}
-.loadpanel[open] summary{border-bottom:1px solid var(--line-soft);color:var(--gold-bright)}
-.loadbody{padding:12px 16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
-.loadp{font-size:13px}
-.loadp .who{font-weight:700;color:var(--text);margin-bottom:5px}
-.loadc{display:flex;align-items:center;gap:7px;padding:3px 0;color:var(--muted)}
-.loadc .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
-.loadc .dot.dps{background:var(--dps)} .loadc .dot.sup{background:var(--sup)}
-.loadc .nm{color:var(--text);font-weight:600}
-.loadc .cnt2{font-family:var(--data);font-size:11px;margin-left:auto}
-.loadc .cnt2.full{color:var(--amber)} .loadc .cnt2.zero{color:var(--dim)}
-.loadc .in{font-size:11px;color:var(--dim);font-family:var(--data)}
+.availpanel{margin-top:10px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.avail-head{padding:13px 16px;font-weight:700;font-size:14px;color:var(--gold-bright);border-bottom:1px solid var(--line-soft)}
+.avail-head span{color:var(--dim);font-weight:500;font-size:12.5px}
+.availraid{border-bottom:1px solid var(--line-soft)}
+.availraid:last-child{border-bottom:none}
+.availraid summary{cursor:pointer;padding:11px 16px;list-style:none;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.availraid summary::-webkit-details-marker{display:none}
+.availraid summary:hover{background:var(--panel2)}
+.availraid[open] summary{background:var(--panel2)}
+.ar-name{font-weight:700;color:var(--text);font-size:13.5px}
+.ar-sub{font-family:var(--data);font-size:11px;color:var(--dim)}
+.ar-counts{margin-left:auto;font-family:var(--data);font-size:11.5px;color:var(--muted)}
+.ar-counts b{font-weight:700} .ar-counts b.sup{color:var(--sup)} .ar-counts b.dps{color:var(--dps)}
+.ar-body{padding:4px 16px 14px}
+.ar-group{display:flex;gap:10px;padding:7px 0;align-items:flex-start}
+.ar-group+.ar-group{border-top:1px solid var(--line-soft)}
+.ar-lbl{flex:0 0 64px;font-family:var(--data);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;padding-top:6px}
+.ar-lbl.sup{color:var(--sup)} .ar-lbl.dps{color:var(--dps)}
+.ar-chips{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px}
+.achip{display:inline-flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--line);
+  border-radius:999px;padding:3px 10px 3px 4px;font-size:12.5px}
+.achip .an{font-weight:600;color:var(--text)}
+.achip .ao{color:var(--dim);font-size:11px}
+.achip .ai{font-family:var(--data);font-size:11px;color:var(--muted)}
+.achip .glyph{width:20px;height:20px}
+.anone{color:var(--dim);font-style:italic;font-size:12px;padding-top:5px}
 
 /* ---------- picker modal ---------- */
 .modal-scrim{position:fixed;inset:0;background:rgba(5,6,10,.66);backdrop-filter:blur(3px);z-index:60;
@@ -898,26 +914,77 @@ function renderParty(party){
       </div>
     </div>`;
 }
-function renderLoadPanel(){
-  const rows = state.players.map(p=>{
-    const chars = p.chars.map(c=>{
-      const fams=[...charFamilies(c.id)];
-      const n=fams.length;
-      const cls = n>=RAID_CAP?'full':(n===0?'zero':'');
-      const inTxt = fams.length ? fams.join(" · ") : "—";
-      return `<div class="loadc"><span class="dot ${c.role}"></span><span class="nm">${esc(c.name)}</span>
-        <span class="in">${esc(inTxt)}</span><span class="cnt2 ${cls}">${n}/${RAID_CAP}</span></div>`;
-    }).join("");
-    return `<div class="loadp"><div class="who">${esc(p.name)}</div>${chars}</div>`;
+// Characters eligible for a raid (meet its ilvl gate) who are NOT already committed to that raid's family.
+function eligibleUnassigned(raid){
+  const fk = familyKey(raid);
+  const req = raid.req || 0;
+  const sup=[], dps=[];
+  state.players.forEach(p=>p.chars.forEach(c=>{
+    const il = parseFloat(c.ilvl);
+    if(isNaN(il) || il < req) return;          // not eligible by item level
+    if(charFamilies(c.id).has(fk)) return;     // already running this raid family
+    const entry = { id:c.id, name:c.name, ilvl:il, role:c.role, cls:c.cls||"", ownerName:p.name };
+    (c.role==='sup'?sup:dps).push(entry);
+  }));
+  const byIl=(a,b)=>b.ilvl-a.ilvl;
+  sup.sort(byIl); dps.sort(byIl);
+  return { sup, dps };
+}
+function availChip(c){
+  return `<span class="achip ${c.role}" title="${esc((CLASS_NAMES[c.cls]||c.cls||'')+' · '+c.ownerName)}">
+      ${roleGlyph(c.role,false,c.cls)}<span class="an">${esc(c.name)}</span><span class="ao">${esc(c.ownerName)}</span><span class="ai">${fmtIl(c.ilvl)}</span></span>`;
+}
+function renderAvailPanel(){
+  if(!state.raids.length) return '';
+  const blocks = state.raids.map(raid=>{
+    const { sup, dps } = eligibleUnassigned(raid);
+    const supHtml = sup.length ? sup.map(availChip).join("") : '<span class="anone">none available</span>';
+    const dpsHtml = dps.length ? dps.map(availChip).join("") : '<span class="anone">none available</span>';
+    const size = raid.teams===2 ? '8-man' : '4-man';
+    return `<details class="availraid">
+      <summary>
+        <span class="ar-name">${esc(raid.label)}</span>
+        <span class="ar-sub">${size} · ≥${raid.req||0}</span>
+        <span class="ar-counts"><b class="sup">${sup.length}</b> SUP · <b class="dps">${dps.length}</b> DPS</span>
+      </summary>
+      <div class="ar-body">
+        <div class="ar-group"><span class="ar-lbl sup">Supports</span><div class="ar-chips">${supHtml}</div></div>
+        <div class="ar-group"><span class="ar-lbl dps">DPS</span><div class="ar-chips">${dpsHtml}</div></div>
+      </div>
+    </details>`;
   }).join("");
-  return `<details class="loadpanel"><summary>Roster load — who's in what</summary><div class="loadbody">${rows}</div></details>`;
+  return `<div class="availpanel">
+    <div class="avail-head">Available by raid <span>— eligible &amp; not yet running that raid</span></div>
+    ${blocks}
+  </div>`;
 }
 function renderBuild(){
   const sel = (raidPick && state.raids.some(r=>r.label===raidPick)) ? raidPick : (state.raids[0]&&state.raids[0].label);
   const options = state.raids.map(r=>`<option value="${esc(r.label)}" ${r.label===sel?'selected':''}>${esc(r.label)} · ${r.teams===2?'8-man':'4-man'} · ≥${r.req||0}</option>`).join("");
-  const parties = state.parties.length
-    ? `<div class="party-grid">${state.parties.map(renderParty).join("")}</div>`
-    : `<div class="party-empty">No parties yet. Pick a raid above and press “Add party”, then tap a slot to drop in a character.</div>`;
+  let parties;
+  if(!state.parties.length){
+    parties = `<div class="party-empty">No parties yet. Pick a raid above and press “Add party”, then tap a slot to drop in a character.</div>`;
+  } else {
+    const order = state.raids.map(r=>r.label);
+    const groups = {};
+    state.parties.forEach(pt=>{ (groups[pt.raidLabel] = groups[pt.raidLabel] || []).push(pt); });
+    const labels = Object.keys(groups).sort((a,b)=>{
+      const ia=order.indexOf(a), ib=order.indexOf(b);
+      return (ia<0?1e9:ia)-(ib<0?1e9:ib);
+    });
+    parties = labels.map(label=>{
+      const r = raidByLabel(label);
+      const meta = r ? `${r.teams===2?'8-man':'4-man'} · ≥${r.req||0}` : 'raid removed';
+      const n = groups[label].length;
+      return `<div class="raidgroup">
+        <div class="raidgroup-head">
+          <span class="rg-name">${esc(label)}</span>
+          <span class="rg-meta">${meta} · ${n} part${n===1?'y':'ies'}</span>
+        </div>
+        <div class="party-grid">${groups[label].map(renderParty).join("")}</div>
+      </div>`;
+    }).join("");
+  }
 
   document.getElementById("view").innerHTML = `
     <div class="section-head">
@@ -930,7 +997,7 @@ function renderBuild(){
       <button class="btn gold" data-action="add-party">${SVG.plus} Add party</button>
     </div>
     ${parties}
-    ${renderLoadPanel()}`;
+    ${renderAvailPanel()}`;
 }
 
 /* =========================================================
