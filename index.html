@@ -331,6 +331,11 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .modal-head .mt{font-family:var(--display);letter-spacing:.05em;font-size:15px;color:var(--gold-bright)}
 .modal-head .ms{font-size:12px;color:var(--muted);font-family:var(--data)}
 .cand-list{overflow-y:auto;padding:8px}
+.cand-searchbar{padding:10px 14px 4px}
+.cand-search{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:8px;
+  padding:9px 11px;font-size:13.5px;color:var(--text)}
+.cand-search:focus{outline:none;border-color:var(--gold-dim)}
+.cand-search::placeholder{color:var(--dim)}
 .cand{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:9px;cursor:pointer;transition:.12s}
 .cand:hover{background:rgba(255,255,255,.04)}
 .cand.disabled{cursor:not-allowed;opacity:.5}
@@ -462,6 +467,7 @@ const DEFAULT_PLAYERS = [];
 
 let state = { tab:"roster", players:null, raids:null, parties:null, apiKey:"", proxy:"" };
 let pick = null; // active picker target {partyId, slotIdx}
+let raidPick = null; // remembered selection in the Add-party dropdown
 const refreshing = new Set(); // character ids currently being refreshed
 let friendDraft = null; // { pname, region, rosterGuid, add:[], skip:[] } during import selection
 
@@ -897,7 +903,8 @@ function renderLoadPanel(){
   return `<details class="loadpanel"><summary>Roster load — who's in what</summary><div class="loadbody">${rows}</div></details>`;
 }
 function renderBuild(){
-  const options = state.raids.map(r=>`<option value="${esc(r.label)}">${esc(r.label)} · ${r.teams===2?'8-man':'4-man'} · ≥${r.req||0}</option>`).join("");
+  const sel = (raidPick && state.raids.some(r=>r.label===raidPick)) ? raidPick : (state.raids[0]&&state.raids[0].label);
+  const options = state.raids.map(r=>`<option value="${esc(r.label)}" ${r.label===sel?'selected':''}>${esc(r.label)} · ${r.teams===2?'8-man':'4-man'} · ≥${r.req||0}</option>`).join("");
   const parties = state.parties.length
     ? `<div class="party-grid">${state.parties.map(renderParty).join("")}</div>`
     : `<div class="party-empty">No parties yet. Pick a raid above and press “Add party”, then tap a slot to drop in a character.</div>`;
@@ -909,7 +916,7 @@ function renderBuild(){
     </div>
     <div class="build-bar">
       <span class="lbl">Raid</span>
-      <select class="raid-pick" id="raid-pick">${options}</select>
+      <select class="raid-pick" id="raid-pick" data-field="raid-pick">${options}</select>
       <button class="btn gold" data-action="add-party">${SVG.plus} Add party</button>
     </div>
     ${parties}
@@ -919,7 +926,7 @@ function renderBuild(){
 /* =========================================================
    Picker modal
    ========================================================= */
-function openPicker(partyId, slotIdx){ pick={partyId,slotIdx}; renderPicker(); document.getElementById("pscrim").classList.add("open"); }
+function openPicker(partyId, slotIdx){ pick={partyId,slotIdx}; renderPicker(); document.getElementById("pscrim").classList.add("open"); setTimeout(()=>{ const s=document.getElementById("cand-search"); if(s) s.focus(); },60); }
 function closePicker(){ pick=null; document.getElementById("pscrim").classList.remove("open"); }
 function renderPicker(){
   const party = state.parties.find(p=>p.id===pick.partyId); if(!party){ closePicker(); return; }
@@ -939,7 +946,8 @@ function renderPicker(){
   const list = cands.length ? cands.map(({ch,reasons})=>{
     const ok = reasons.length===0;
     const attr = ok ? `data-action="pick-char" data-charid="${ch.id}"` : '';
-    return `<div class="cand ${ok?'':'disabled'}" ${attr}>
+    const search = esc(`${ch.name} ${ch.ownerName} ${CLASS_NAMES[ch.cls]||ch.cls||''}`.toLowerCase());
+    return `<div class="cand ${ok?'':'disabled'}" ${attr} data-search="${search}">
       ${roleGlyph(ch.role,false,ch.cls)}
       <span class="nm">${esc(ch.name)}</span>
       <span class="ow">${esc(ch.ownerName)}</span>
@@ -957,8 +965,18 @@ function renderPicker(){
       </div>
       <button class="close-x" data-action="close-picker">${SVG.x}</button>
     </div>
-    <div class="cand-list">${list}</div>
+    ${cands.length?`<div class="cand-searchbar"><input id="cand-search" class="cand-search" data-field="cand-search" placeholder="Search name, roster or class…" autocomplete="off" spellcheck="false" /></div>`:''}
+    <div class="cand-list">${list}<div class="cand-empty" id="cand-none" style="display:none">No matches.</div></div>
     <div class="modal-foot"><button class="btn ghost" data-action="close-picker">Cancel</button></div>`;
+}
+function filterCandidates(q){
+  q=(q||"").trim().toLowerCase();
+  let vis=0;
+  document.querySelectorAll('#picker .cand').forEach(r=>{
+    const show = !q || (r.getAttribute('data-search')||'').includes(q);
+    r.style.display = show ? '' : 'none'; if(show) vis++;
+  });
+  const none=document.getElementById('cand-none'); if(none) none.style.display = vis ? 'none' : '';
 }
 
 /* =========================================================
@@ -1187,6 +1205,7 @@ document.addEventListener("click", e=>{
 
     case "add-party":{
       const label=document.getElementById("raid-pick").value;
+      raidPick=label;
       const r=raidByLabel(label); if(!r) break;
       state.parties.push({ id:uid(), raidLabel:label, name:label, slots:slotsForRaid(r) });
       save(); renderBuild(); renderStats(); break;
@@ -1224,6 +1243,7 @@ document.addEventListener("input", e=>{
   else if(f==="party-name"){ const p=state.parties.find(x=>x.id===el.dataset.party); if(p) p.name=el.value; }
   else if(f==="api-key"){ state.apiKey=el.value.trim(); saveApiKey(); const d=document.querySelector(".apikey-box span"); if(d) d.className=state.apiKey?'dotok':'dotno'; return; }
   else if(f==="proxy-url"){ state.proxy=el.value.trim(); saveProxy(); return; }
+  else if(f==="cand-search"){ filterCandidates(el.value); return; }
   else return;
   save(true);
 });
@@ -1234,6 +1254,7 @@ document.addEventListener("change", e=>{
   else if(f==="char-ilvl"){ const c=findChar(el.dataset.pid,el.dataset.cid); if(c) c.ilvl=parseFloat(el.value)||0; save(); renderRoster(); renderStats(); }
   else if(f==="raid-teams"){ const r=state.raids[+el.dataset.ri]; if(r) r.teams=parseInt(el.value); save(); renderSettings(); render(); }
   else if(f==="raid-req"){ save(); renderSettings(); render(); }
+  else if(f==="raid-pick"){ raidPick=el.value; }
   else if(f==="raid-family"){ save(); render(); }
 });
 
