@@ -386,6 +386,19 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .f-status .f-err svg{flex-shrink:0;margin-top:1px}
 .f-status .f-load{color:var(--teal);font-family:var(--data)}
 .f-note{font-size:11.5px;color:var(--dim);line-height:1.45}
+.btn.sm{padding:6px 11px;font-size:12px}
+.board-actions{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 10px}
+.board-status{background:var(--panel2);border:1px solid var(--line-soft);border-radius:10px;padding:11px 13px;margin-bottom:10px}
+.bs-line{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13.5px}
+.bs-mode{font-family:var(--data);font-size:10px;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:999px}
+.bs-mode.edit{color:var(--sup);background:var(--sup-soft);box-shadow:inset 0 0 0 1px var(--sup-line)}
+.bs-mode.view{color:var(--gold-bright);background:rgba(217,180,91,.1);box-shadow:inset 0 0 0 1px var(--gold-dim)}
+.sync-tag{margin-left:auto;font-family:var(--data);font-size:11px;color:var(--dim)}
+.sync-tag.err{color:var(--dps)}
+.board-list{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.board-row{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line-soft);border-radius:8px;padding:6px 10px}
+.bl-name{flex:1;min-width:0;font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.board-create{border-top:1px solid var(--line-soft);padding-top:10px;margin-top:4px}
 .modal.wide{width:min(640px,96vw)}
 .xfer{display:flex;gap:10px;align-items:stretch}
 .xfer-col{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--line-soft);
@@ -524,6 +537,7 @@ let saveTimer=null;
 async function save(quiet){
   const payload = JSON.stringify({players:state.players,raids:state.raids,parties:state.parties});
   try{ await store.set(KEY,payload); if(!quiet) flashSaved(); }catch(e){}
+  boardSchedulePush();
 }
 
 /* API key stored separately so "reset to defaults" never wipes it */
@@ -533,6 +547,149 @@ async function saveApiKey(){ try{ await store.set(AKEY, state.apiKey||""); }catc
 const PKEY = "wartable:proxy";
 async function loadProxy(){ try{ const r=await store.get(PKEY); state.proxy = (r&&r.value)||""; }catch(e){ state.proxy=""; } }
 async function saveProxy(){ try{ await store.set(PKEY, state.proxy||""); }catch(e){} }
+
+/* =========================================================
+   Shared board (Cloudflare D1 Worker) — open viewing, password to edit
+   ========================================================= */
+const BKEY = "wartable:board";
+let board = { url:"", id:"", name:"", pw:"", mode:"off", lastUpdated:0 }; // mode: off|view|edit
+let boardList = [];
+let boardDirty=false, boardPushing=false, boardPushQueued=false, boardPushTimer=null, boardPollTimer=null, boardApplying=false;
+async function loadBoard(){ try{ const r=await store.get(BKEY); if(r&&r.value){ const b=JSON.parse(r.value); Object.assign(board,{url:b.url||"",id:b.id||"",name:b.name||"",pw:b.pw||"",mode:b.mode||"off",lastUpdated:0}); } }catch(e){} }
+async function persistBoard(){ try{ await store.set(BKEY, JSON.stringify({url:board.url,id:board.id,name:board.name,pw:board.pw,mode:board.mode})); }catch(e){} }
+function boardBase(){ return (board.url||"").replace(/\/+$/,''); }
+async function boardApi(path, opts){
+  const r = await fetch(boardBase()+path, opts||{});
+  let data=null; try{ data=await r.json(); }catch(e){}
+  if(!r.ok) throw (data&&data.error) || ("HTTP "+r.status);
+  return data;
+}
+function boardPayload(){
+  return {
+    players: state.players.map(p=>({ id:p.id, name:p.name||"", region:p.region||"", roster_guid:p.rosterGuid||"",
+      chars:(p.chars||[]).map(c=>({ id:c.id, name:c.name||"", ilvl:c.ilvl, role:c.role||"dps", cp:(c.cp==null?null:c.cp), cls:c.cls||"" })) })),
+    raids: state.raids.map(r=>({ label:r.label||"", family:r.family||"", req:r.req||0, teams:r.teams||1 })),
+    parties: state.parties.map(pt=>({ id:pt.id, raidLabel:pt.raidLabel||"", name:pt.name||"",
+      slots:(pt.slots||[]).map(sl=>({ team:sl.team||0, role:sl.role||"dps", charId:sl.charId||null })) }))
+  };
+}
+function applyBoardData(data){
+  const charsBy={}; (data.characters||[]).forEach(c=>{ (charsBy[c.player_id]=charsBy[c.player_id]||[]).push(c); });
+  state.players = (data.players||[]).map(p=>({
+    id:p.id, name:p.name||"", region:p.region||undefined, rosterGuid:p.roster_guid||undefined,
+    chars:(charsBy[p.id]||[]).sort((a,b)=>(a.sort||0)-(b.sort||0)).map(c=>({ id:c.id, name:c.name||"", ilvl:c.ilvl, role:c.role||"dps", cp:(c.cp==null?null:c.cp), cls:c.cls||"" }))
+  }));
+  state.raids = (data.raids||[]).map(r=>({ label:r.label||"", family:r.family||"", req:r.req||0, teams:r.teams||1 }));
+  const slotsBy={}; (data.slots||[]).forEach(s=>{ (slotsBy[s.party_id]=slotsBy[s.party_id]||[]).push(s); });
+  state.parties = (data.parties||[]).map(pt=>({
+    id:pt.id, raidLabel:pt.raid_label||"", name:pt.name||"",
+    slots:(slotsBy[pt.id]||[]).sort((a,b)=>(a.slot_idx||0)-(b.slot_idx||0)).map(s=>({ team:s.team||0, role:s.role||"dps", charId:s.char_id||null }))
+  }));
+  board.lastUpdated = (data.board&&data.board.updated_at)||0;
+}
+async function boardLoad(){
+  if(!board.id||!boardBase()) return;
+  const data = await boardApi("/board/"+encodeURIComponent(board.id));
+  boardApplying=true; applyBoardData(data); await save(true); boardApplying=false;
+  boardDirty=false; render(); renderSettings();
+}
+function boardSchedulePush(){
+  if(board.mode!=="edit"||boardApplying) return;
+  boardDirty=true; clearTimeout(boardPushTimer); boardPushTimer=setTimeout(boardPush, 1200);
+}
+async function boardPush(){
+  if(board.mode!=="edit"||!board.id) return;
+  if(boardPushing){ boardPushQueued=true; return; }
+  boardPushing=true;
+  try{
+    const res = await boardApi("/board/"+encodeURIComponent(board.id)+"/sync", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ password:board.pw, state:boardPayload() })
+    });
+    board.lastUpdated = res.updated_at||Date.now(); boardDirty=false; setSyncTag("Synced "+clockNow());
+  }catch(e){ setSyncTag("Sync failed: "+e, true); }
+  finally{ boardPushing=false; if(boardPushQueued){ boardPushQueued=false; boardPush(); } }
+}
+function boardStartPoll(){
+  clearInterval(boardPollTimer);
+  if(board.mode==="off"||!board.id) return;
+  boardPollTimer=setInterval(async()=>{
+    if(boardPushing||boardDirty) return; // don't clobber pending local edits
+    try{
+      const data = await boardApi("/board/"+encodeURIComponent(board.id));
+      const remote = (data.board&&data.board.updated_at)||0;
+      if(remote>board.lastUpdated){
+        boardApplying=true; applyBoardData(data); await save(true); boardApplying=false;
+        boardDirty=false; render(); renderSettings(); setSyncTag("Updated "+clockNow());
+      }
+    }catch(e){}
+  }, 20000);
+}
+function clockNow(){ try{ return new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
+function setSyncTag(msg, err){ const el=document.getElementById("sync-tag"); if(el){ el.textContent=msg; el.className="sync-tag"+(err?" err":""); } }
+function boardDisconnect(){ clearInterval(boardPollTimer); Object.assign(board,{id:"",name:"",pw:"",mode:"off",lastUpdated:0}); persistBoard(); renderSettings(); toast("Disconnected — using local copy"); }
+async function boardListFetch(){
+  if(!boardBase()){ toast("Enter the Worker URL first", true); return; }
+  try{ boardList = await boardApi("/boards") || []; renderSettings(); }
+  catch(e){ toast("Couldn't list boards: "+e, true); }
+}
+async function boardViewOpen(id){
+  const b=boardList.find(x=>x.id===id);
+  Object.assign(board,{id, name:(b&&b.name)||id, pw:"", mode:"view"}); persistBoard();
+  try{ await boardLoad(); boardStartPoll(); toast("Viewing "+board.name); }
+  catch(e){ toast("Load failed: "+e, true); }
+}
+async function boardEnterPassword(id, name){
+  const pw = prompt("Edit password for \u201c"+(name||id)+"\u201d:");
+  if(pw==null) return;
+  try{
+    const res = await boardApi("/board/"+encodeURIComponent(id)+"/verify", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw})});
+    if(!res.ok){ toast("Wrong password", true); return; }
+    Object.assign(board,{id, name:name||id, pw, mode:"edit"}); persistBoard();
+    await boardLoad(); boardStartPoll(); toast("Editing "+board.name);
+  }catch(e){ toast("Failed: "+e, true); }
+}
+async function boardCreate(){
+  const name=((document.getElementById("board-new-name")||{}).value||"").trim();
+  const pw=((document.getElementById("board-new-pw")||{}).value||"");
+  if(!boardBase()){ toast("Enter the Worker URL first", true); return; }
+  if(!name||!pw){ toast("Name and password are required", true); return; }
+  try{
+    const res=await boardApi("/boards", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,password:pw})});
+    Object.assign(board,{id:res.id, name:res.name, pw, mode:"edit", lastUpdated:0}); persistBoard();
+    await boardPush();          // seed the new board with the current local data
+    boardStartPoll(); renderSettings(); toast("Created \u201c"+res.name+"\u201d");
+  }catch(e){ toast("Create failed: "+e, true); }
+}
+function boardSectionHtml(){
+  if(board.mode!=="off"){
+    return `
+      <div class="board-status">
+        <div class="bs-line"><span class="bs-mode ${board.mode}">${board.mode==="edit"?"Editing":"Viewing"}</span>
+          <b>${esc(board.name||board.id)}</b><span id="sync-tag" class="sync-tag"></span></div>
+        <div class="board-actions">
+          ${board.mode==="view"?`<button class="btn ghost sm" data-action="board-edit">Enter edit password</button>`:""}
+          <button class="btn ghost sm" data-action="board-reload">Reload</button>
+          <button class="btn ghost sm" data-action="board-disconnect">Disconnect</button>
+        </div>
+        ${board.mode==="view"?`<p class="note">View-only: changes you make here won't sync and may be replaced on the next refresh.</p>`:""}
+      </div>`;
+  }
+  const listHtml = boardList.length ? `<div class="board-list">${boardList.map(b=>`
+      <div class="board-row">
+        <span class="bl-name">${esc(b.name)}</span>
+        <button class="btn ghost sm" data-action="board-view" data-bid="${esc(b.id)}">View</button>
+        <button class="btn ghost sm" data-action="board-editopen" data-bid="${esc(b.id)}" data-bname="${esc(b.name)}">Edit</button>
+      </div>`).join("")}</div>` : "";
+  return `
+    <div class="board-actions"><button class="btn ghost full" data-action="board-list">List boards on this Worker</button></div>
+    ${listHtml}
+    <div class="board-create">
+      <div class="fld"><label>New board name</label><input class="f-in" id="board-new-name" placeholder="Tuesday Static" autocomplete="off" /></div>
+      <div class="fld"><label>Edit password</label><input class="f-in" id="board-new-pw" type="password" placeholder="choose a password" autocomplete="new-password" /></div>
+      <button class="btn gold full" data-action="board-create">Create &amp; seed from this device</button>
+    </div>`;
+}
 
 /* Roster import via api.ags.lol (two-step: character -> roster) */
 const API_BASE = "https://api.ags.lol/api/v1/mirth";
@@ -1223,6 +1380,11 @@ function renderSettings(){
     ${raids}
     <button class="btn ghost full" data-action="add-raid">${SVG.plus} Add raid</button>
 
+    <h3>Shared board</h3>
+    <p class="note">Store this board on your Cloudflare D1 Worker so your group sees the same rosters and parties. Anyone with the link can view; the board password is needed to edit. Your local copy is the fallback when you're disconnected, and connecting to a board replaces that working copy.</p>
+    <div class="fld"><label>Worker URL</label><input class="f-in" data-field="board-url" value="${esc(board.url)}" placeholder="https://wartable-board.you.workers.dev" autocomplete="off" spellcheck="false" /></div>
+    ${boardSectionHtml()}
+
     <h3>Data</h3>
     <p class="note">Everything saves automatically on this device.</p>
     <button class="btn danger full" data-action="reset-data">Reset to defaults</button>`;
@@ -1338,6 +1500,13 @@ document.addEventListener("click", e=>{
       if(i>0){ const a=state.raids; [a[i-1],a[i]]=[a[i],a[i-1]]; save(); renderSettings(); render(); }
       break;
     }
+    case "board-list": boardListFetch(); break;
+    case "board-view": boardViewOpen(el.dataset.bid); break;
+    case "board-editopen": boardEnterPassword(el.dataset.bid, el.dataset.bname); break;
+    case "board-edit": boardEnterPassword(board.id, board.name); break;
+    case "board-create": boardCreate(); break;
+    case "board-reload": boardLoad().catch(e=>toast("Reload failed: "+e,true)); break;
+    case "board-disconnect": boardDisconnect(); break;
     case "move-raid-down":{
       const i=+el.dataset.ri;
       if(i<state.raids.length-1){ const a=state.raids; [a[i],a[i+1]]=[a[i+1],a[i]]; save(); renderSettings(); render(); }
@@ -1358,6 +1527,7 @@ document.addEventListener("input", e=>{
   else if(f==="party-name"){ const p=state.parties.find(x=>x.id===el.dataset.party); if(p) p.name=el.value; }
   else if(f==="api-key"){ state.apiKey=el.value.trim(); saveApiKey(); const d=document.querySelector(".apikey-box span"); if(d) d.className=state.apiKey?'dotok':'dotno'; return; }
   else if(f==="proxy-url"){ state.proxy=el.value.trim(); saveProxy(); return; }
+  else if(f==="board-url"){ board.url=el.value.trim(); persistBoard(); return; }
   else if(f==="cand-search"){ filterCandidates(el.value); return; }
   else return;
   save(true);
@@ -1388,7 +1558,9 @@ document.addEventListener("keydown",e=>{
 /* =========================================================
    Boot
    ========================================================= */
-(async function(){ await loadApiKey(); await loadProxy(); await loadState(); render(); })();
+(async function(){ await loadApiKey(); await loadProxy(); await loadBoard(); await loadState(); render();
+  if(board.mode!=="off" && board.id && boardBase()){ try{ await boardLoad(); }catch(e){ setSyncTag("Offline — local copy", true); } boardStartPoll(); }
+})();
 
 </script>
 </body>
