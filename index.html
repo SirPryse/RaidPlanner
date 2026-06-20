@@ -785,13 +785,9 @@ function loadTag(charId){
   const n=charRaidCount(charId);
   return `<span class="brk${n===0?' none':''}">${n}/${RAID_CAP}</span>`;
 }
-function renderRoster(){
-  const scrolls = {};
-  document.querySelectorAll('.char-list[data-pid]').forEach(el=>{ scrolls[el.dataset.pid]=el.scrollTop; });
-  const winY = window.scrollY;
-  const cards = state.players.map(p=>{
-    const chars = p.chars.map(c=>`
-      <div class="char">
+function charRowHTML(p, c){
+  return `
+      <div class="char" data-cid="${c.id}">
         <div class="char-top">
           ${roleGlyph(c.role,false,c.cls)}
           <input class="cname" value="${esc(c.name)}" placeholder="Character" data-field="char-name" data-pid="${p.id}" data-cid="${c.id}" />
@@ -807,8 +803,11 @@ function renderRoster(){
           ${p.region?`<button class="icon-btn refresh-btn" data-action="refresh-char" data-pid="${p.id}" data-cid="${c.id}" title="Refresh from API" ${refreshing.has(c.id)?'disabled':''}>${refreshing.has(c.id)?`<span class="spin">${SVG.refresh}</span>`:SVG.refresh}</button>`:''}
           <button class="icon-btn" data-action="del-char" data-pid="${p.id}" data-cid="${c.id}" title="Remove">${SVG.trash}</button>
         </div>
-      </div>`).join("");
-    return `
+      </div>`;
+}
+function rosterCardHTML(p){
+  const chars = p.chars.map(c=>charRowHTML(p,c)).join("");
+  return `
       <div class="pcard">
         <div class="pcard-head">
           ${SVG.user}
@@ -819,7 +818,18 @@ function renderRoster(){
         <div class="char-list" data-pid="${p.id}">${chars || '<div class="empty-state">No characters yet.</div>'}</div>
         <button class="btn full ghost" data-action="add-char" data-pid="${p.id}">${SVG.plus} Add character</button>
       </div>`;
-  }).join("");
+}
+// Append a newly added roster without re-rendering (keeps scroll). Falls back to full render if grid absent.
+function appendRosterCard(p){
+  const grid=document.querySelector('.roster-grid');
+  if(state.tab==="roster" && grid){ grid.insertAdjacentHTML('beforeend', rosterCardHTML(p)); renderStats(); }
+  else { render(); }
+}
+function renderRoster(){
+  const scrolls = {};
+  document.querySelectorAll('.char-list[data-pid]').forEach(el=>{ scrolls[el.dataset.pid]=el.scrollTop; });
+  const winY = window.scrollY;
+  const cards = state.players.map(rosterCardHTML).join("");
 
   const hasKey = !!(state.apiKey && state.apiKey.length);
   document.getElementById("view").innerHTML = `
@@ -1178,27 +1188,43 @@ document.addEventListener("click", e=>{
     case "friend-confirm":{
       if(!friendDraft) break;
       if(!friendDraft.add.length){ const s=document.getElementById("f-status"); if(s) s.innerHTML=fErr("Pick at least one character to add."); break; }
-      state.players.push({ id:uid(), name:friendDraft.pname, region:friendDraft.region, rosterGuid:friendDraft.rosterGuid, chars:friendDraft.add });
-      friendDraft=null; save(); closeFriend(); renderRoster(); renderStats(); break;
+      const np={ id:uid(), name:friendDraft.pname, region:friendDraft.region, rosterGuid:friendDraft.rosterGuid, chars:friendDraft.add };
+      state.players.push(np);
+      friendDraft=null; save(); closeFriend(); appendRosterCard(np); break;
     }
-    case "add-blank-friend":
-      state.players.push({id:uid(),name:"New friend",chars:[{id:uid(),name:"Character",ilvl:1710,role:"dps"}]});
-      save(); closeFriend(); renderRoster(); renderStats(); break;
-
-    case "add-player":
-      state.players.push({id:uid(),name:"New friend",chars:[{id:uid(),name:"Character",ilvl:1710,role:"dps"}]});
-      save(); renderRoster(); renderStats(); break;
+    case "add-blank-friend":{
+      const np={id:uid(),name:"New friend",chars:[{id:uid(),name:"Character",ilvl:1710,role:"dps"}]};
+      state.players.push(np); save(); closeFriend(); appendRosterCard(np); break;
+    }
+    case "add-player":{
+      const np={id:uid(),name:"New friend",chars:[{id:uid(),name:"Character",ilvl:1710,role:"dps"}]};
+      state.players.push(np); save(); appendRosterCard(np); break;
+    }
     case "del-player":
       purgePlayer(el.dataset.pid);
       state.players=state.players.filter(p=>p.id!==el.dataset.pid);
       save(); renderRoster(); renderStats(); break;
     case "add-char":{
-      const p=findPlayer(el.dataset.pid);
-      if(p){ p.chars.push({id:uid(),name:"Character",ilvl:1710,role:"dps"}); save(); renderRoster(); renderStats(); } break;
+      const p=findPlayer(el.dataset.pid); if(!p) break;
+      const c={id:uid(),name:"Character",ilvl:1710,role:"dps"};
+      p.chars.push(c);
+      const list=document.querySelector(`.char-list[data-pid="${p.id}"]`);
+      if(list){
+        const empty=list.querySelector('.empty-state'); if(empty) empty.remove();
+        list.insertAdjacentHTML('beforeend', charRowHTML(p,c));
+        list.scrollTop=list.scrollHeight;             // reveal the new row, no full re-render
+      } else { renderRoster(); }
+      save(); renderStats(); break;
     }
     case "del-char":{
-      const p=findPlayer(el.dataset.pid);
-      if(p){ purgeChar(el.dataset.cid); p.chars=p.chars.filter(c=>c.id!==el.dataset.cid); save(); renderRoster(); renderStats(); } break;
+      const p=findPlayer(el.dataset.pid); if(!p) break;
+      purgeChar(el.dataset.cid);
+      p.chars=p.chars.filter(c=>c.id!==el.dataset.cid);
+      const row=document.querySelector(`.char[data-cid="${el.dataset.cid}"]`);
+      if(row && !p.chars.length){ row.remove(); renderRoster(); }   // show empty-state
+      else if(row){ row.remove(); }                                  // surgical, keeps scroll
+      else { renderRoster(); }
+      save(); renderStats(); break;
     }
     case "refresh-char": refreshChar(el.dataset.pid, el.dataset.cid); break;
     case "refresh-roster": refreshRoster(el.dataset.pid); break;
