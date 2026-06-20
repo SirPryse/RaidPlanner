@@ -273,6 +273,14 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .raid-pick{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:9px 12px;
   font-size:14px;color:var(--text);min-width:170px}
 .raid-pick:focus{outline:none;border-color:var(--gold-dim)}
+.filterbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r);padding:10px 14px;margin:-8px 0 18px}
+.filterbar .lbl{font-family:var(--data);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.filter-chips{display:flex;flex-wrap:wrap;gap:6px;flex:1;min-width:0}
+.fchip{background:var(--bg);border:1px solid var(--line);color:var(--muted);border-radius:999px;
+  padding:5px 12px;font-size:12.5px;font-weight:600;cursor:pointer;transition:.12s}
+.fchip:hover{border-color:var(--gold-dim);color:var(--text)}
+.fchip.on{background:var(--sup-soft);border-color:var(--sup-line);color:var(--sup)}
 .party-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px;align-items:start;margin-bottom:8px}
 .raidgroup{margin-bottom:18px}
 .raidgroup-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
@@ -520,6 +528,7 @@ const DEFAULT_PLAYERS = [];
 let state = { tab:"roster", players:null, raids:null, parties:null, apiKey:"", proxy:"" };
 let pick = null; // active picker target {partyId, slotIdx}
 let raidPick = null; // remembered selection in the Add-party dropdown
+let partyFilter = new Set(); // roster ids; when non-empty, only parties containing those rosters show
 const refreshing = new Set(); // character ids currently being refreshed
 let friendDraft = null; // { pname, region, rosterGuid, add:[], skip:[] } during import selection
 
@@ -1171,30 +1180,48 @@ function renderAvailPanel(){
 function renderBuild(){
   const sel = (raidPick && state.raids.some(r=>r.label===raidPick)) ? raidPick : (state.raids[0]&&state.raids[0].label);
   const options = state.raids.map(r=>`<option value="${esc(r.label)}" ${r.label===sel?'selected':''}>${esc(r.label)} · ${r.teams===2?'8-man':'4-man'} · ≥${r.req||0}</option>`).join("");
+  const activeFilter = partyFilter.size>0;
+  const partyMatches = pt => !activeFilter || pt.slots.some(sl=>{
+    if(!sl.charId) return false;
+    const c = charById(sl.charId);
+    return c && partyFilter.has(c.ownerId);
+  });
   let parties;
   if(!state.parties.length){
     parties = `<div class="party-empty">No parties yet. Pick a raid above and press “Add party”, then tap a slot to drop in a character.</div>`;
   } else {
     const order = state.raids.map(r=>r.label);
     const groups = {};
-    state.parties.forEach(pt=>{ (groups[pt.raidLabel] = groups[pt.raidLabel] || []).push(pt); });
+    state.parties.forEach(pt=>{ if(partyMatches(pt)){ (groups[pt.raidLabel] = groups[pt.raidLabel] || []).push(pt); } });
     const labels = Object.keys(groups).sort((a,b)=>{
       const ia=order.indexOf(a), ib=order.indexOf(b);
       return (ia<0?1e9:ia)-(ib<0?1e9:ib);
     });
-    parties = labels.map(label=>{
-      const r = raidByLabel(label);
-      const meta = r ? `${r.teams===2?'8-man':'4-man'} · ≥${r.req||0} · family: ${esc(familyKey(r))}` : 'raid removed';
-      const n = groups[label].length;
-      return `<div class="raidgroup">
-        <div class="raidgroup-head">
-          <span class="rg-name">${esc(label)}</span>
-          <span class="rg-meta">${meta} · ${n} part${n===1?'y':'ies'}</span>
-        </div>
-        <div class="party-grid">${groups[label].map(renderParty).join("")}</div>
-      </div>`;
-    }).join("");
+    if(!labels.length){
+      parties = `<div class="party-empty">No parties include the selected roster${partyFilter.size>1?'s':''}. <button class="btn ghost sm" data-action="clear-filter">Clear filter</button></div>`;
+    } else {
+      parties = labels.map(label=>{
+        const r = raidByLabel(label);
+        const meta = r ? `${r.teams===2?'8-man':'4-man'} · ≥${r.req||0} · family: ${esc(familyKey(r))}` : 'raid removed';
+        const n = groups[label].length;
+        return `<div class="raidgroup">
+          <div class="raidgroup-head">
+            <span class="rg-name">${esc(label)}</span>
+            <span class="rg-meta">${meta} · ${n} part${n===1?'y':'ies'}</span>
+          </div>
+          <div class="party-grid">${groups[label].map(renderParty).join("")}</div>
+        </div>`;
+      }).join("");
+    }
   }
+  const filterBar = state.players.length ? `
+    <div class="filterbar">
+      <span class="lbl">Show rosters</span>
+      <div class="filter-chips">
+        ${state.players.map(p=>`<button class="fchip ${partyFilter.has(p.id)?'on':''}" data-action="toggle-filter" data-pid="${p.id}">${esc(p.name)}</button>`).join("")}
+      </div>
+      ${partyFilter.size?`<button class="btn ghost sm" data-action="clear-filter">Clear</button>`:''}
+    </div>` : '';
 
   document.getElementById("view").innerHTML = `
     <div class="section-head">
@@ -1206,6 +1233,7 @@ function renderBuild(){
       <select class="raid-pick" id="raid-pick" data-field="raid-pick">${options}</select>
       <button class="btn gold" data-action="add-party">${SVG.plus} Add party</button>
     </div>
+    ${filterBar}
     ${parties}
     ${renderAvailPanel()}`;
 }
@@ -1542,6 +1570,12 @@ document.addEventListener("click", e=>{
     case "del-party":
       state.parties=state.parties.filter(p=>p.id!==el.dataset.party);
       save(); renderBuild(); renderStats(); break;
+    case "toggle-filter":{
+      const pid=el.dataset.pid;
+      if(partyFilter.has(pid)) partyFilter.delete(pid); else partyFilter.add(pid);
+      renderBuild(); break;
+    }
+    case "clear-filter": partyFilter.clear(); renderBuild(); break;
     case "assign-slot":
       openPicker(el.dataset.party, +el.dataset.slot); break;
     case "clear-slot":{
