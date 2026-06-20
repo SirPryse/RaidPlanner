@@ -361,6 +361,7 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .cand .il2{font-family:var(--data);font-size:12.5px;color:var(--muted)}
 .cand .why{font-size:11px;color:var(--amber);font-family:var(--data);text-align:right;max-width:42%}
 .cand-empty{padding:26px 14px;text-align:center;color:var(--dim);font-style:italic;font-size:13.5px}
+.cand-note{padding:8px 16px;border-top:1px solid var(--line-soft);color:var(--dim);font-size:11.5px;font-family:var(--data)}
 .modal-foot{padding:11px 14px;border-top:1px solid var(--line-soft);display:flex;justify-content:flex-end}
 
 /* ---------- api key + friend import ---------- */
@@ -640,6 +641,8 @@ function familyKey(raidOrLabel){
   if(r){ const f=(r.family||'').trim(); return f || r.label; }
   return typeof raidOrLabel==='string' ? raidOrLabel : '';
 }
+// normalized form used for matching, so "Cathedral", "cathedral" and "Cathedral " all link together
+const famNorm = s => String(s||'').trim().toLowerCase().replace(/\s+/g,' ');
 function charById(id){
   for(const p of state.players) for(const c of p.chars)
     if(c.id===id) return { id:c.id, name:c.name, ilvl:parseFloat(c.ilvl), role:c.role, cls:c.cls||"", ownerId:p.id, ownerName:p.name };
@@ -667,7 +670,7 @@ function charFamilies(charId, exceptPartyId){
   state.parties.forEach(pt=>{
     if(exceptPartyId && pt.id===exceptPartyId) return;
     if(pt.slots.some(sl=>sl.charId===charId)){
-      const fk = familyKey(pt.raidLabel); if(fk) fams.add(fk);
+      const fk = famNorm(familyKey(pt.raidLabel)); if(fk) fams.add(fk);
     }
   });
   return fams;
@@ -680,8 +683,9 @@ function blockReasons(char, party, raid, slotRole){
   if(partyOwners(party).has(char.ownerId)) reasons.push("Roster already in this party");
   if(raid && char.ilvl < (raid.req||0)) reasons.push("Below item lvl "+raid.req);
   const fams=charFamilies(char.id, party.id);
-  const fk = familyKey(raid || party.raidLabel);
-  if(fk && fams.has(fk)) reasons.push("Already on "+fk);
+  const fkRaw = familyKey(raid || party.raidLabel);
+  const fk = famNorm(fkRaw);
+  if(fk && fams.has(fk)) reasons.push("Already on "+fkRaw);
   else if(fams.size>=RAID_CAP) reasons.push("At "+RAID_CAP+"-raid cap");
   return reasons;
 }
@@ -916,7 +920,7 @@ function renderParty(party){
 }
 // Characters eligible for a raid (meet its ilvl gate) who are NOT already committed to that raid's family.
 function eligibleUnassigned(raid){
-  const fk = familyKey(raid);
+  const fk = famNorm(familyKey(raid));
   const req = raid.req || 0;
   const sup=[], dps=[];
   state.players.forEach(p=>p.chars.forEach(c=>{
@@ -941,10 +945,11 @@ function renderAvailPanel(){
     const supHtml = sup.length ? sup.map(availChip).join("") : '<span class="anone">none available</span>';
     const dpsHtml = dps.length ? dps.map(availChip).join("") : '<span class="anone">none available</span>';
     const size = raid.teams===2 ? '8-man' : '4-man';
+    const famName = familyKey(raid);
     return `<details class="availraid">
       <summary>
         <span class="ar-name">${esc(raid.label)}</span>
-        <span class="ar-sub">${size} · ≥${raid.req||0}</span>
+        <span class="ar-sub">${size} · ≥${raid.req||0} · family: ${esc(famName)}</span>
         <span class="ar-counts"><b class="sup">${sup.length}</b> SUP · <b class="dps">${dps.length}</b> DPS</span>
       </summary>
       <div class="ar-body">
@@ -974,7 +979,7 @@ function renderBuild(){
     });
     parties = labels.map(label=>{
       const r = raidByLabel(label);
-      const meta = r ? `${r.teams===2?'8-man':'4-man'} · ≥${r.req||0}` : 'raid removed';
+      const meta = r ? `${r.teams===2?'8-man':'4-man'} · ≥${r.req||0} · family: ${esc(familyKey(r))}` : 'raid removed';
       const n = groups[label].length;
       return `<div class="raidgroup">
         <div class="raidgroup-head">
