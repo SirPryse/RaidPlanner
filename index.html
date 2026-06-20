@@ -396,6 +396,8 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .f-status .f-err svg{flex-shrink:0;margin-top:1px}
 .f-status .f-load{color:var(--teal);font-family:var(--data)}
 .f-note{font-size:11.5px;color:var(--dim);line-height:1.45}
+.managed-tag{font-family:var(--data);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;
+  color:var(--sup);background:var(--sup-soft);border:1px solid var(--sup-line);border-radius:999px;padding:1px 7px;margin-left:6px}
 .btn.sm{padding:6px 11px;font-size:12px}
 .board-actions{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 10px}
 .board-status{background:var(--panel2);border:1px solid var(--line-soft);border-radius:10px;padding:11px 13px;margin-bottom:10px}
@@ -579,6 +581,22 @@ const PKEY = "wartable:proxy";
 async function loadProxy(){ try{ const r=await store.get(PKEY); state.proxy = (r&&r.value)||""; }catch(e){ state.proxy=""; } }
 async function saveProxy(){ try{ await store.set(PKEY, state.proxy||""); }catch(e){} }
 
+/* Site config served next to index.html on GitHub Pages (config.json).
+   Lets the host pre-wire the Worker URLs so users never type them. */
+let siteConfig = { proxy:"", board:"", token:"" };
+async function loadSiteConfig(){
+  try{
+    const r = await fetch("./config.json", { cache:"no-store" });
+    if(r.ok){ const c = await r.json();
+      siteConfig.proxy=(c.proxy||"").trim(); siteConfig.board=(c.board||"").trim(); siteConfig.token=(c.token||"").trim(); }
+  }catch(e){}
+  if(/PASTE-YOUR/i.test(siteConfig.proxy)) siteConfig.proxy="";   // ignore unfilled template
+  if(/PASTE-YOUR/i.test(siteConfig.board)) siteConfig.board="";
+}
+const proxyManaged = ()=> !!siteConfig.proxy;
+const boardManaged = ()=> !!siteConfig.board;
+function wtHeaders(extra){ const h = Object.assign({}, extra||{}); if(siteConfig.token) h["x-wt-token"]=siteConfig.token; return h; }
+
 /* =========================================================
    Shared board (Cloudflare D1 Worker) — open viewing, password to edit
    ========================================================= */
@@ -590,7 +608,9 @@ async function loadBoard(){ try{ const r=await store.get(BKEY); if(r&&r.value){ 
 async function persistBoard(){ try{ await store.set(BKEY, JSON.stringify({url:board.url,id:board.id,name:board.name,pw:board.pw,mode:board.mode})); }catch(e){} }
 function boardBase(){ return (board.url||"").replace(/\/+$/,''); }
 async function boardApi(path, opts){
-  const r = await fetch(boardBase()+path, opts||{});
+  opts = opts||{};
+  opts.headers = wtHeaders(opts.headers);
+  const r = await fetch(boardBase()+path, opts);
   let data=null; try{ data=await r.json(); }catch(e){}
   if(!r.ok) throw (data&&data.error) || ("HTTP "+r.status);
   return data;
@@ -770,7 +790,7 @@ const cpOf = c => (c && c.max_combat_power && c.max_combat_power.score!=null) ? 
 const round2 = v => { const n=parseFloat(v); return isNaN(n)?0:Math.round(n*100)/100; };
 async function fetchRoster(region, name){
   if(!state.apiKey) throw "Enter your API key first (top-right of the Roster tab).";
-  const h = { headers:{ "x-api-key": state.apiKey } };
+  const h = { headers: wtHeaders({ "x-api-key": state.apiKey }) };
   let cRes;
   try{ cRes = await fetch(apiUrl(`/characters/by-name/${encodeURIComponent(region)}/${encodeURIComponent(name)}`), h); }
   catch(e){ throw "Could not reach the API — your browser is likely blocked by CORS. Add a proxy URL below."; }
@@ -791,7 +811,7 @@ async function fetchRoster(region, name){
 async function fetchCharacter(region, name){
   if(!state.apiKey) throw "Set your API key first (top-right of the Roster tab).";
   let res;
-  try{ res = await fetch(apiUrl(`/characters/by-name/${encodeURIComponent(region)}/${encodeURIComponent(name)}`), { headers:{ "x-api-key":state.apiKey } }); }
+  try{ res = await fetch(apiUrl(`/characters/by-name/${encodeURIComponent(region)}/${encodeURIComponent(name)}`), { headers: wtHeaders({ "x-api-key":state.apiKey }) }); }
   catch(e){ throw "Couldn't reach the API — likely CORS. Set a proxy URL in Add a friend."; }
   if(res.status===401 || res.status===403) throw "API key was rejected.";
   if(res.status===404) throw `“${name}” not found in ${region}.`;
@@ -819,7 +839,7 @@ async function refreshRoster(pid){
   p.chars.forEach(c=>refreshing.add(c.id)); renderRoster();
   try{
     let res;
-    try{ res = await fetch(apiUrl(`/rosters/by-guid/${encodeURIComponent(p.rosterGuid)}`), { headers:{ "x-api-key":state.apiKey } }); }
+    try{ res = await fetch(apiUrl(`/rosters/by-guid/${encodeURIComponent(p.rosterGuid)}`), { headers: wtHeaders({ "x-api-key":state.apiKey }) }); }
     catch(e){ throw "Couldn't reach the API — likely CORS."; }
     if(!res.ok) throw `Roster refresh failed (HTTP ${res.status}).`;
     const roster = await res.json();
@@ -1327,8 +1347,8 @@ function friendSearchHTML(){
         <input id="f-name" class="f-in" placeholder="e.g. Raineryaa" autocomplete="off" spellcheck="false" />
       </div>
       <div class="fld">
-        <label>CORS proxy URL <span style="color:var(--dim)">— only if requests are blocked</span></label>
-        <input id="f-proxy" class="f-in" placeholder="https://your-worker.workers.dev" value="${esc(state.proxy)}" data-field="proxy-url" autocomplete="off" spellcheck="false" />
+        <label>CORS proxy URL ${proxyManaged()?'<span class="managed-tag">set by site</span>':'<span style="color:var(--dim)">— only if requests are blocked</span>'}</label>
+        <input id="f-proxy" class="f-in" placeholder="https://your-worker.workers.dev" value="${esc(state.proxy)}" data-field="proxy-url" autocomplete="off" spellcheck="false" ${proxyManaged()?'disabled':''} />
       </div>
       <div class="f-status" id="f-status"></div>
       <div class="f-note">Fetches the roster, then lets you choose which characters to add. Roles come from each character's combat-power type. If your browser blocks the API (CORS), paste your proxy URL above.</div>
@@ -1458,7 +1478,7 @@ function renderSettings(){
 
     <h3>Shared board</h3>
     <p class="note">Store this board on your Cloudflare D1 Worker so your group sees the same rosters and parties. Anyone with the link can view; the board password is needed to edit. Your local copy is the fallback when you're disconnected, and connecting to a board replaces that working copy.</p>
-    <div class="fld"><label>Worker URL</label><input class="f-in" data-field="board-url" value="${esc(board.url)}" placeholder="https://wartable-board.you.workers.dev" autocomplete="off" spellcheck="false" /></div>
+    <div class="fld"><label>Worker URL ${boardManaged()?'<span class="managed-tag">set by site</span>':''}</label><input class="f-in" data-field="board-url" value="${esc(board.url)}" placeholder="https://wartable-board.you.workers.dev" autocomplete="off" spellcheck="false" ${boardManaged()?'disabled':''} /></div>
     ${boardSectionHtml()}
 
     <h3>Data</h3>
@@ -1660,7 +1680,12 @@ document.addEventListener("keydown",e=>{
 /* =========================================================
    Boot
    ========================================================= */
-(async function(){ await loadApiKey(); await loadProxy(); await loadBoard(); await loadState(); render();
+(async function(){
+  await loadApiKey(); await loadProxy(); await loadBoard();
+  await loadSiteConfig();
+  if(siteConfig.proxy){ state.proxy = siteConfig.proxy; saveProxy(); }         // site-managed CORS proxy
+  if(siteConfig.board){ board.url = siteConfig.board; persistBoard(); }         // site-managed board Worker
+  await loadState(); render();
   if(board.mode!=="off" && board.id && boardBase()){ try{ await boardLoad(); }catch(e){ setSyncTag("Offline — local copy", true); } boardStartPoll(); }
 })();
 
