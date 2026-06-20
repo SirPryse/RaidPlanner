@@ -99,6 +99,8 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .glyph{width:26px;height:26px;border-radius:6px;display:grid;place-items:center;flex-shrink:0}
 .glyph.dps{background:var(--dps-soft);color:var(--dps);box-shadow:inset 0 0 0 1px var(--dps-line)}
 .glyph.sup{background:var(--sup-soft);color:var(--sup);box-shadow:inset 0 0 0 1px var(--sup-line)}
+.cls-img{width:90%;height:90%;object-fit:contain;display:block}
+.cls-fallback{display:none;align-items:center;justify-content:center}
 .cname{flex:1;background:transparent;border:none;font-weight:600;font-size:13.5px;padding:2px;min-width:0}
 .cp{font-family:var(--data);font-size:11px;font-weight:600;white-space:nowrap;flex-shrink:0}
 .cp.dps{color:var(--dps)} .cp.sup{color:var(--sup)}
@@ -561,7 +563,7 @@ async function fetchCharacter(region, name){
   if(!res.ok) throw `Lookup failed (HTTP ${res.status}).`;
   return await res.json();
 }
-function applyApiChar(c, data){ c.ilvl=round2(data.item_level); c.role=roleFromApi(data); c.cp=cpOf(data); }
+function applyApiChar(c, data){ c.ilvl=round2(data.item_level); c.role=roleFromApi(data); c.cp=cpOf(data); c.cls=data.class||c.cls||""; }
 async function refreshChar(pid, cid){
   if(refreshing.has(cid)) return;
   const p=findPlayer(pid); const c=p && p.chars.find(x=>x.id===cid); if(!c) return;
@@ -618,7 +620,7 @@ function familyKey(raidOrLabel){
 }
 function charById(id){
   for(const p of state.players) for(const c of p.chars)
-    if(c.id===id) return { id:c.id, name:c.name, ilvl:parseFloat(c.ilvl), role:c.role, ownerId:p.id, ownerName:p.name };
+    if(c.id===id) return { id:c.id, name:c.name, ilvl:parseFloat(c.ilvl), role:c.role, cls:c.cls||"", ownerId:p.id, ownerName:p.name };
   return null;
 }
 function slotsForRaid(raid){
@@ -683,7 +685,74 @@ const SVG = {
   arrowL:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>',
   arrowR:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>',
 };
-const roleGlyph = (role,dash) => `<span class="glyph ${role}${dash?' dash':''}">${role==='dps'?SVG.sword:SVG.leaf}</span>`;
+// Official Lost Ark class names, keyed by the API's class string.
+const CLASS_NAMES = {
+  alchemist:"Wildsoul", arcana:"Arcana", battle_master:"Wardancer", bard:"Bard",
+  berserker:"Berserker", berserker_female:"Slayer", blade:"Deathblade", demonic:"Shadowhunter",
+  destroyer:"Destroyer", devil_hunter:"Deadeye", devil_hunter_female:"Gunslinger",
+  dragon_knight:"Guardian Knight", elemental_master:"Sorceress", force_master:"Soulfist",
+  holyknight:"Paladin", holyknight_female:"Valkyrie", infighter_male:"Breaker",
+  lance_master:"Glaivier", reaper:"Reaper", soul_eater:"Souleater", summoner:"Summoner",
+  warlord:"Gunlancer", weather_artist:"Aeromancer", yinyangshi:"Artist", infighter:"Scrapper",
+  blaster:"Artillerist", scouter:"Scouter", hawk_eye:"Sharpshooter", battle_master_male:"Striker"
+};
+// Original archetype glyphs (not the game's copyrighted icons), grouped by weapon/theme.
+const CLASS_ICON = {
+  blade:"dualblade", berserker:"greatsword", berserker_female:"greatsword", destroyer:"hammer",
+  lance_master:"glaive", dragon_knight:"glaive", warlord:"shield", reaper:"dagger",
+  soul_eater:"scythe", demonic:"claw", alchemist:"paw",
+  battle_master:"fist", battle_master_male:"fist", infighter:"fist", infighter_male:"fist",
+  force_master:"orb",
+  devil_hunter:"gun", devil_hunter_female:"gun", blaster:"cannon", hawk_eye:"bow", scouter:"drone",
+  elemental_master:"staff", arcana:"card", summoner:"star", weather_artist:"umbrella",
+  bard:"harp", holyknight:"holy", holyknight_female:"wing", yinyangshi:"brush"
+};
+const GI = {
+  sword:'<path d="M14.5 17.5 3 6V3h3l11.5 11.5"/><path d="M13 19l6-6"/><path d="M16 16l4 4"/><path d="M19 21l2-2"/>',
+  leaf:'<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/>',
+  dualblade:'<path d="M6 4 18 16"/><path d="M18 4 6 16"/><path d="M5 16l3 3-1 2M19 16l-3 3 1 2"/>',
+  greatsword:'<path d="M12 2 9.5 8.5 12 19l2.5-10.5L12 2Z"/><path d="M7 8.5h10"/><path d="M12 19v3"/>',
+  hammer:'<path d="M4 20 11 13"/><path d="M9 11l4-4 5 5-4 4-5-5Z"/>',
+  glaive:'<path d="M3 21 16 8"/><path d="M12 5h7v7"/><path d="M9 15l2-2"/>',
+  shield:'<path d="M12 3 5 6v5c0 4 3 7 7 9 4-2 7-5 7-9V6l-7-3Z"/>',
+  dagger:'<path d="M14 4 8 10l2.5 2.5L16.5 6.5 14 4Z"/><path d="M8 10l-3 7 7-3"/>',
+  scythe:'<path d="M5 20 17 8"/><path d="M17 8c1-3-1-6-4.5-6 2.8 2 2.8 4 .5 6 2 0 3 0 4 0Z"/>',
+  claw:'<path d="M5 4c2.5 4 3.5 9 2.5 15M10.5 4c1.5 4.5 2 9 1 15M16 4c1 4.5 .5 9-.5 14.5M20 7c.3 4-.7 8-2.7 11"/>',
+  paw:'<ellipse cx="12" cy="15" rx="4" ry="3.2"/><circle cx="7" cy="9.5" r="1.5"/><circle cx="12" cy="7.6" r="1.5"/><circle cx="17" cy="9.5" r="1.5"/>',
+  fist:'<circle cx="12" cy="12" r="3.4"/><path d="M12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3M5.8 5.8 8 8M16 16l2.2 2.2M18.2 5.8 16 8M8 16l-2.2 2.2"/>',
+  orb:'<circle cx="12" cy="12" r="4"/><path d="M12 4a8 8 0 0 1 0 16M12 4a8 8 0 0 0 0 16"/>',
+  gun:'<path d="M4 8h14v3h-3l-2 3h-3l-1-3H4z"/><path d="M8 11v3"/>',
+  cannon:'<path d="M3 13a3 3 0 0 0 3 3h5l8-8-3-3-8 8H6a3 3 0 0 0-3 3Z"/><circle cx="18" cy="6" r="1.2"/>',
+  bow:'<path d="M7 3a13 13 0 0 1 0 18"/><path d="M7 3 19 12 7 21"/>',
+  drone:'<rect x="9" y="9" width="6" height="6" rx="1"/><circle cx="5" cy="5" r="1.7"/><circle cx="19" cy="5" r="1.7"/><circle cx="5" cy="19" r="1.7"/><circle cx="19" cy="19" r="1.7"/><path d="M7 7l2 2M17 7l-2 2M7 17l2-2M17 17l-2-2"/>',
+  staff:'<path d="M7 21 15.5 12.5"/><circle cx="17" cy="10" r="3"/>',
+  card:'<rect x="6.5" y="3" width="11" height="18" rx="2"/><path d="M12 8l2.5 4-2.5 4-2.5-4Z"/>',
+  star:'<path d="M12 3c.5 4 1 4.5 5 5-4 .5-4.5 1-5 5-.5-4-1-4.5-5-5 4-.5 4.5-1 5-5Z"/><path d="M18.5 14c.2 2 .4 2.2 2.5 2.5-2.1.3-2.3.5-2.5 2.5-.2-2-.4-2.2-2.5-2.5 2.1-.3 2.3-.5 2.5-2.5Z"/>',
+  umbrella:'<path d="M12 3a9 9 0 0 1 9 8H3a9 9 0 0 1 9-8Z"/><path d="M12 11v6.5a2 2 0 0 0 4 0"/>',
+  harp:'<path d="M5 21 18 4"/><path d="M18 4C11 5 7 10 6 17"/><path d="M9.5 13l3 3M12.5 9l3 3"/>',
+  holy:'<circle cx="12" cy="12" r="9"/><path d="M12 7v10M8 11h8"/>',
+  wing:'<path d="M12 4v15"/><path d="M12 8C9.5 5.5 6 6 4.5 9c2.5 0 3.5 1.5 3.5 3.5 2-1 3-.5 4 .5"/><path d="M12 8c2.5-2.5 6-2 7.5 1-2.5 0-3.5 1.5-3.5 3.5-2-1-3-.5-4 .5"/>',
+  brush:'<path d="M15 4 20 9l-8.5 8.5-4-4L15 4Z"/><path d="M4 20s1.2-2 3-2"/>'
+};
+const ICON_DIR = "icon/";   // folder of class icons, file named by API class key, e.g. icon/demonic.png
+const ICON_EXT = ".png";
+function classSvg(role,cls){
+  const key = (cls && CLASS_ICON[cls]) || (role==='dps'?'sword':'leaf');
+  return GI[key] || (role==='dps'?GI.sword:GI.leaf);
+}
+function roleGlyph(role,dash,cls){
+  const tip = cls ? (CLASS_NAMES[cls]||cls) : (role==='dps'?'DPS':'Support');
+  const svg = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${classSvg(role,cls)}</svg>`;
+  let inner;
+  if(cls){
+    inner = `<img class="cls-img" src="${ICON_DIR}${esc(cls)}${ICON_EXT}" alt="" `
+      + `onerror="this.onerror=null;this.style.display='none';var f=this.nextElementSibling;if(f)f.style.display='inline-flex';">`
+      + `<span class="cls-fallback" style="display:none">${svg}</span>`;
+  } else {
+    inner = svg;
+  }
+  return `<span class="glyph ${role}${dash?' dash':''}" title="${esc(tip)}">${inner}</span>`;
+}
 const warnIcon=()=>'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.6 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0Z"/></svg>';
 const checkIcon=()=>'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
 
@@ -715,7 +784,7 @@ function renderRoster(){
     const chars = p.chars.map(c=>`
       <div class="char">
         <div class="char-top">
-          ${roleGlyph(c.role)}
+          ${roleGlyph(c.role,false,c.cls)}
           <input class="cname" value="${esc(c.name)}" placeholder="Character" data-field="char-name" data-pid="${p.id}" data-cid="${c.id}" />
           ${c.cp!=null?`<span class="cp ${c.role}" title="Combat power">${fmtCp(c.cp)}</span>`:''}
         </div>
@@ -765,7 +834,7 @@ function slotHTML(party, idx){
   const sl = party.slots[idx];
   const c = sl.charId ? charById(sl.charId) : null;
   if(c){
-    return `<div class="slot">${roleGlyph(c.role)}
+    return `<div class="slot">${roleGlyph(c.role,false,c.cls)}
       <span class="name">${esc(c.name)}</span>
       <span class="owner">${esc(c.ownerName)}</span>
       <span class="il">${fmtIl(c.ilvl)}</span>
@@ -854,7 +923,7 @@ function renderPicker(){
   const cands = [];
   state.players.forEach(p=>p.chars.forEach(c=>{
     if(c.role!==slot.role) return;
-    const ch = { id:c.id, name:c.name, ilvl:parseFloat(c.ilvl), role:c.role, ownerId:p.id, ownerName:p.name };
+    const ch = { id:c.id, name:c.name, ilvl:parseFloat(c.ilvl), role:c.role, cls:c.cls||"", ownerId:p.id, ownerName:p.name };
     cands.push({ ch, reasons: blockReasons(ch, party, raid, slot.role) });
   }));
   cands.sort((a,b)=>{
@@ -866,7 +935,7 @@ function renderPicker(){
     const ok = reasons.length===0;
     const attr = ok ? `data-action="pick-char" data-charid="${ch.id}"` : '';
     return `<div class="cand ${ok?'':'disabled'}" ${attr}>
-      ${roleGlyph(ch.role)}
+      ${roleGlyph(ch.role,false,ch.cls)}
       <span class="nm">${esc(ch.name)}</span>
       <span class="ow">${esc(ch.ownerName)}</span>
       <span class="il2">${fmtIl(ch.ilvl)}</span>
@@ -931,7 +1000,7 @@ function friendSearchHTML(){
 }
 function xferItem(c){
   return `<div class="xfer-item" data-action="friend-toggle" data-cid="${c.id}" title="Tap to move">
-      ${roleGlyph(c.role)}
+      ${roleGlyph(c.role,false,c.cls)}
       <span class="nm">${esc(c.name)}</span>
       ${c.cp!=null?`<span class="cp ${c.role}">${fmtCp(c.cp)}</span>`:''}
       <span class="il">${fmtIl(c.ilvl)}</span></div>`;
@@ -985,7 +1054,7 @@ async function importFriend(){
     const { searched, roster } = await fetchRoster(region, name);
     const chars=(roster.characters||[])
       .filter(c=>c && c.name)
-      .map(c=>({ id:uid(), name:c.name, ilvl:round2(c.item_level), role:roleFromApi(c), cp:cpOf(c) }))
+      .map(c=>({ id:uid(), name:c.name, ilvl:round2(c.item_level), role:roleFromApi(c), cp:cpOf(c), cls:c.class||"" }))
       .sort((a,b)=>b.ilvl-a.ilvl);
     if(!chars.length){ statusEl.innerHTML=fErr("That roster came back with no characters."); go.disabled=false; return; }
     friendDraft = {
