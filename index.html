@@ -399,6 +399,26 @@ input,select{font-family:inherit;color:var(--text);font-size:14px}
 .board-row{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line-soft);border-radius:8px;padding:6px 10px}
 .bl-name{flex:1;min-width:0;font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .board-create{border-top:1px solid var(--line-soft);padding-top:10px;margin-top:4px}
+
+/* ---------- view-only lock (when viewing a shared board) ---------- */
+.readonly #view input, .readonly #view select,
+.readonly .raidrow input, .readonly .raidrow select{ pointer-events:none; opacity:.7 }
+.readonly .build-bar,
+.readonly .add-player,
+.readonly .rm-x,
+.readonly [data-action="add-char"],
+.readonly [data-action="del-char"],
+.readonly [data-action="del-player"],
+.readonly [data-action="del-party"],
+.readonly [data-action="refresh-char"],
+.readonly [data-action="refresh-roster"],
+.readonly [data-action="add-raid"],
+.readonly [data-action="del-raid"],
+.readonly [data-action="move-raid-up"],
+.readonly [data-action="move-raid-down"],
+.readonly [data-action="reset-data"]{ display:none !important }
+.readonly .slot.assignable{ pointer-events:none; opacity:.55 }
+.readonly .slot.assignable .plus-ic{ display:none }
 .modal.wide{width:min(640px,96vw)}
 .xfer{display:flex;gap:10px;align-items:stretch}
 .xfer-col{flex:1 1 0;min-width:0;background:var(--panel2);border:1px solid var(--line-soft);
@@ -627,7 +647,7 @@ function boardStartPoll(){
 }
 function clockNow(){ try{ return new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; } }
 function setSyncTag(msg, err){ const el=document.getElementById("sync-tag"); if(el){ el.textContent=msg; el.className="sync-tag"+(err?" err":""); } }
-function boardDisconnect(){ clearInterval(boardPollTimer); Object.assign(board,{id:"",name:"",pw:"",mode:"off",lastUpdated:0}); persistBoard(); renderSettings(); toast("Disconnected — using local copy"); }
+function boardDisconnect(){ clearInterval(boardPollTimer); Object.assign(board,{id:"",name:"",pw:"",mode:"off",lastUpdated:0}); persistBoard(); render(); renderSettings(); toast("Disconnected — using local copy"); }
 async function boardListFetch(){
   if(!boardBase()){ toast("Enter the Worker URL first", true); return; }
   try{ boardList = await boardApi("/boards") || []; renderSettings(); }
@@ -661,6 +681,19 @@ async function boardCreate(){
     boardStartPoll(); renderSettings(); toast("Created \u201c"+res.name+"\u201d");
   }catch(e){ toast("Create failed: "+e, true); }
 }
+async function boardDelete(id, name, knownPw){
+  if(!boardBase()){ toast("Enter the Worker URL first", true); return; }
+  if(!confirm("Delete \u201c"+(name||id)+"\u201d for everyone?\n\nThis permanently removes the board and all its rosters and parties. This cannot be undone.")) return;
+  let pw = knownPw;
+  if(!pw){ pw = prompt("Edit password for \u201c"+(name||id)+"\u201d to confirm deletion:"); if(pw==null) return; }
+  try{
+    await boardApi("/board/"+encodeURIComponent(id)+"/delete", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw})});
+    if(board.id===id) boardDisconnect();
+    boardList = boardList.filter(b=>b.id!==id);
+    toast("Deleted \u201c"+(name||id)+"\u201d");
+    boardListFetch().catch(()=>renderSettings());
+  }catch(e){ toast("Delete failed: "+e, true); }
+}
 function boardSectionHtml(){
   if(board.mode!=="off"){
     return `
@@ -671,6 +704,7 @@ function boardSectionHtml(){
           ${board.mode==="view"?`<button class="btn ghost sm" data-action="board-edit">Enter edit password</button>`:""}
           <button class="btn ghost sm" data-action="board-reload">Reload</button>
           <button class="btn ghost sm" data-action="board-disconnect">Disconnect</button>
+          ${board.mode==="edit"?`<button class="btn ghost sm danger" data-action="board-delete-current">Delete board</button>`:""}
         </div>
         ${board.mode==="view"?`<p class="note">View-only: changes you make here won't sync and may be replaced on the next refresh.</p>`:""}
       </div>`;
@@ -680,6 +714,7 @@ function boardSectionHtml(){
         <span class="bl-name">${esc(b.name)}</span>
         <button class="btn ghost sm" data-action="board-view" data-bid="${esc(b.id)}">View</button>
         <button class="btn ghost sm" data-action="board-editopen" data-bid="${esc(b.id)}" data-bname="${esc(b.name)}">Edit</button>
+        <button class="btn ghost sm danger" data-action="board-delete" data-bid="${esc(b.id)}" data-bname="${esc(b.name)}" title="Delete board">${SVG.trash}</button>
       </div>`).join("")}</div>` : "";
   return `
     <div class="board-actions"><button class="btn ghost full" data-action="board-list">List boards on this Worker</button></div>
@@ -1395,10 +1430,25 @@ function renderSettings(){
    Dispatch
    ========================================================= */
 function render(){
+  document.body.classList.toggle("readonly", readOnly());
   renderStats();
   document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("active",t.dataset.tab===state.tab));
   if(state.tab==="roster") renderRoster(); else renderBuild();
 }
+function readOnly(){ return board.mode==="view"; }
+// actions that mutate shared data — blocked while viewing a board
+const EDIT_ACTIONS = new Set([
+  "open-friend","add-blank-friend","add-player","add-char","del-char","del-player",
+  "add-party","del-party","assign-slot","clear-slot","pick-char",
+  "refresh-char","refresh-roster",
+  "add-raid","del-raid","move-raid-up","move-raid-down","reset-data",
+  "fetch-roster","friend-toggle","friend-all-add","friend-all-skip","friend-confirm","friend-back"
+]);
+// shared-data fields — blocked while viewing (board/api/proxy fields stay editable)
+const DATA_FIELDS = new Set([
+  "player-name","char-name","char-ilvl","char-role","party-name",
+  "raid-label","raid-family","raid-req","raid-teams","raid-pick"
+]);
 const findPlayer = id => state.players.find(p=>p.id===id);
 const findChar = (pid,cid)=>{ const p=findPlayer(pid); return p&&p.chars.find(c=>c.id===cid); };
 
@@ -1408,6 +1458,7 @@ const findChar = (pid,cid)=>{ const p=findPlayer(pid); return p&&p.chars.find(c=
 document.addEventListener("click", e=>{
   const el = e.target.closest("[data-action]"); if(!el) return;
   const a = el.dataset.action;
+  if(readOnly() && EDIT_ACTIONS.has(a)){ toast("View-only — enter the edit password to make changes", true); return; }
   switch(a){
     case "tab": state.tab=el.dataset.tab; render(); break;
     case "open-settings": openDrawer(true); break;
@@ -1505,6 +1556,8 @@ document.addEventListener("click", e=>{
     case "board-editopen": boardEnterPassword(el.dataset.bid, el.dataset.bname); break;
     case "board-edit": boardEnterPassword(board.id, board.name); break;
     case "board-create": boardCreate(); break;
+    case "board-delete": boardDelete(el.dataset.bid, el.dataset.bname); break;
+    case "board-delete-current": boardDelete(board.id, board.name, board.pw); break;
     case "board-reload": boardLoad().catch(e=>toast("Reload failed: "+e,true)); break;
     case "board-disconnect": boardDisconnect(); break;
     case "move-raid-down":{
@@ -1518,6 +1571,7 @@ document.addEventListener("click", e=>{
 
 document.addEventListener("input", e=>{
   const el=e.target, f=el.dataset.field; if(!f) return;
+  if(readOnly() && DATA_FIELDS.has(f)) return;
   if(f==="player-name"){ const p=findPlayer(el.dataset.pid); if(p) p.name=el.value; }
   else if(f==="char-name"){ const c=findChar(el.dataset.pid,el.dataset.cid); if(c) c.name=el.value; }
   else if(f==="char-ilvl"){ const c=findChar(el.dataset.pid,el.dataset.cid); if(c) c.ilvl=el.value; }
@@ -1535,6 +1589,7 @@ document.addEventListener("input", e=>{
 
 document.addEventListener("change", e=>{
   const el=e.target, f=el.dataset.field; if(!f) return;
+  if(readOnly() && DATA_FIELDS.has(f)) return;
   if(f==="char-role"){ const c=findChar(el.dataset.pid,el.dataset.cid); if(c){ c.role=el.value; purgeChar(c.id); } save(); renderRoster(); renderStats(); }
   else if(f==="char-ilvl"){ const c=findChar(el.dataset.pid,el.dataset.cid); if(c) c.ilvl=parseFloat(el.value)||0; save(); renderRoster(); renderStats(); }
   else if(f==="raid-teams"){ const r=state.raids[+el.dataset.ri]; if(r) r.teams=parseInt(el.value); save(); renderSettings(); render(); }
